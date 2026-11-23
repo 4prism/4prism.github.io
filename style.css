@@ -146,3 +146,4 @@ footer p{margin:4px 0}footer a{color:var(--ink-2)}footer b{color:var(--ink)}.dim
 @media (max-width:520px){.kw{grid-template-columns:1fr}}
 .sec p+.dl{margin-top:14px}
 .tbl+.note{margin-top:14px}
+.h1-name{display:block;margin-bottom:10px;font-size:13.5px;line-height:1.4;letter-spacing:0}
