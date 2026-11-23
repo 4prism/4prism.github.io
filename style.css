@@ -128,3 +128,13 @@ footer p{margin:4px 0}footer a{color:var(--ink-2)}footer b{color:var(--ink)}.dim
 .maker{margin-top:6px;font-size:14px;color:var(--ink-3)}
 .half{max-width:620px}
 #start{scroll-margin-top:72px}
+.tbl{overflow-x:auto;margin-top:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper)}
+.tbl table{width:100%;border-collapse:collapse;font-size:15px}
+.tbl th,.tbl td{text-align:left;vertical-align:top;padding:12px 14px;border-bottom:1px solid var(--line)}
+.tbl thead th{background:var(--paper-2);color:var(--ink);font-weight:600;white-space:nowrap}
+.tbl tbody tr:last-child>*{border-bottom:0}
+.tbl tbody th{color:var(--ink);font-weight:600;white-space:nowrap}
+.tbl td{color:var(--ink-3)}.tbl td b{color:var(--w1-d)}
+@media (max-width:640px){.tbl table,.tbl thead,.tbl tbody,.tbl tr,.tbl th,.tbl td{display:block}.tbl thead{display:none}.tbl tr{padding:12px 14px;border-bottom:1px solid var(--line)}.tbl th,.tbl td{padding:2px 0;border:0}.tbl tbody th{margin-bottom:4px}}
+.dl.qa{grid-template-columns:1fr;gap:4px 0}.dl.qa dd{margin-bottom:18px}
+@media (max-width:640px){.dl{grid-template-columns:1fr;gap:2px 0}.dl dd{margin-bottom:14px}}
