@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://4prism.github.io/sitemap.xml
+Sitemap: https://4prism.github.io/desk-tips/sitemap.xml
