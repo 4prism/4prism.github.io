@@ -123,3 +123,8 @@ footer p{margin:4px 0}footer a{color:var(--ink-2)}footer b{color:var(--ink)}.dim
 #start .lb-form input:not([type=radio]):not([type=checkbox]),#start .lb-form select{border-radius:var(--r-s);border-color:var(--line-2);background:var(--paper)}
 #start .lb-form .btn{background:var(--ink);color:#FFFEFC;font-weight:500;padding:11px 20px;border-radius:var(--r)}
 #start .lb-done{background:var(--w1-bg);border-radius:var(--r)}
+.proof{margin:24px 0 0;max-width:760px}.proof img{border:1px solid var(--line);border-radius:var(--r-l)}.proof figcaption{margin-top:8px;font-size:13.5px;color:var(--ink-3)}
+.sub-links{margin-top:12px;font-size:14px;color:var(--ink-3)}.sub-links a{color:var(--ink-2)}
+.maker{margin-top:6px;font-size:14px;color:var(--ink-3)}
+.half{max-width:620px}
+#start{scroll-margin-top:72px}
