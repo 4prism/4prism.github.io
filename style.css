@@ -147,3 +147,9 @@ footer p{margin:4px 0}footer a{color:var(--ink-2)}footer b{color:var(--ink)}.dim
 .sec p+.dl{margin-top:14px}
 .tbl+.note{margin-top:14px}
 .h1-name{display:block;margin-bottom:10px;font-size:13.5px;line-height:1.4;letter-spacing:0}
+.hands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 36px;margin-top:22px}
+.hand h3{font-size:17px;margin-bottom:6px}.hand h3 a{text-decoration:none}.hand h3 a:hover{text-decoration:underline}
+.hand .fast{margin-top:10px;font-size:15px;color:var(--ink-3)}.hand .fast b{display:block;color:var(--w1-d);font-size:14px;margin-bottom:2px}
+.two>.shot+.shot{margin:0}
+.dl+.tbl{margin-top:22px}.sec .tbl+.note{margin-top:14px}
+@media (max-width:860px){.hands{grid-template-columns:1fr}}
