@@ -8,6 +8,13 @@
 - [부재중·지각·수술·빈자리](https://4prism.github.io/alerts.html)
 - [설치](https://4prism.github.io/install.html)
 
+## 주제별
+- [치과 데스크 자동화](https://4prism.github.io/dental-automation.html): 서류·리콜·부재중·지각, 매일 되풀이되는 데스크 일을 줄이는 법
+- [덴트웹 리콜 자동화](https://4prism.github.io/dentweb-recall.html): 리콜 명단·전화할 이유·첫마디·통화 기록까지
+- [치과 보험서류 자동 발급](https://4prism.github.io/dental-insurance-docs.html): 실비·치아보험 서류 5종을 한 번에
+- [치과 AI](https://4prism.github.io/dental-ai.html): 데스크에서는 덴트웹 기록을 읽고 할 일을 골라 주는 데 씁니다
+- [치과 데스크 프로그램 고르는 법](https://4prism.github.io/dental-desk-program.html): 도입 전에 확인할 기준표
+
 ## 보험 서류
 - [치과 보험 청구(실비·치아보험)할 때 치과에서 떼 주는 서류는 뭐예요?](https://4prism.github.io/faq/silbi-docs.html): 실비(실손보험)는 보통 진료비 계산서·영수증과 세부산정내역(세부내역서)이면 돼요. 치아보험은 여기에 치과치료확인서(보험사 양식)·치료 전·후 사진을 더 달라고 하
 - [치과 데스크에서 보험 청구 서류를 한 번에 뽑는 방법이 있나요?](https://4prism.github.io/faq/silbi-one-click.html): 전자차트 기본 기능만 쓰면 서류마다 따로 열어 출력해야 해요. 덴트웹을 쓰는 치과라면 데스크알리미의 [5종 한 번에 만들기]로 계산서·영수증, 세부산정내역, 진료
