@@ -48,10 +48,11 @@ footer{border-top:1px solid var(--line);padding:28px 0 48px;font-size:15px;color
 .voice.wait{border-style:dashed;background:transparent}.voice.wait blockquote{color:var(--ink2);font-size:15px}
 @media (max-width:860px){.voices{grid-template-columns:1fr}}
 .h1-sub{display:block;margin-top:6px;color:var(--acc);font-size:.72em}
-.lead2{color:var(--ink2);font-size:16px;line-height:1.7;margin:-4px 0 0}
+.lead2{color:var(--ink2);font-size:16px;line-height:1.7;margin:10px 0 0}
 .tips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}
 .tip{border:1px solid var(--line);border-radius:14px;background:var(--paper);padding:20px 22px}
 .tip .tag{display:inline-block;font-size:13px;font-weight:700;color:var(--acc);background:var(--accbg);border-radius:999px;padding:3px 10px}
 .tip h3{margin:10px 0 6px;font-size:18px}.tip p{margin:0;color:var(--ink2);line-height:1.7}
 .tips-more{margin-top:18px}
 @media (max-width:860px){.tips{grid-template-columns:1fr}}
+.hero h1{font-size:clamp(30px,3.4vw,44px);word-break:keep-all;line-height:1.25}
