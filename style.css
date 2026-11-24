@@ -58,6 +58,12 @@ p{margin:0}b,strong{font-weight:600;color:var(--ink)}
 .kicker{margin:0 0 8px;font-size:13.5px;font-weight:600;color:var(--w1-d)}
 h2{font-size:clamp(23px,2.6vw,30px)}h3{font-size:18px}
 .more{margin-top:22px;font-size:15px}.more a{font-weight:500}
+.blog-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:4px}
+.blog-card{display:block;border:1px solid var(--line);border-radius:10px;padding:18px 20px;text-decoration:none;color:var(--ink-2);transition:border-color .15s,box-shadow .15s}
+.blog-card:hover{border-color:var(--acc);box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.blog-card .bc-tag{font-size:12px;font-weight:600;color:var(--acc);display:block;margin-bottom:6px}
+.blog-card b{font-size:15px;font-weight:700;color:var(--ink);display:block;margin-bottom:6px;line-height:1.45}
+.blog-card p{margin:0;font-size:13.5px;color:var(--ink-3);line-height:1.6}
 .cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px;border-top:1px solid var(--ink);padding-top:22px}
 .cols3 b{font-size:17px}.cols3 p{margin-top:6px;color:var(--ink-3);font-size:15.5px}
 .rows{list-style:none;margin:0 0 36px;padding:0;border-top:1px solid var(--line-2)}
@@ -116,6 +122,7 @@ footer p{margin:4px 0}footer a{color:var(--ink-2)}footer b{color:var(--ink)}.dim
   .cols3,.two,.feat,.voices{grid-template-columns:1fr;gap:22px}
   .rows a{grid-template-columns:1fr 20px;gap:4px 12px}.rows a span{grid-column:1}.rows a i{grid-row:1;grid-column:2}
   .tips li{grid-template-columns:34px 1fr;gap:4px 10px}.tips li>div{grid-column:2}.t-k{grid-column:2}
+  .blog-grid{grid-template-columns:1fr}
   .cta-row .btn{flex:1 1 auto;justify-content:center}
 }
 /* 신청 칸(퍼널팀 파일)을 이 톤에 맞춤 */
