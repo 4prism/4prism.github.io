@@ -1,0 +1,168 @@
+<!--
+  #/desk/kiosk 의 iframe — 환자 접수 QR(화면 꽉 차게) + 「키오스크 창 열기」
+
+  사용자 지시(2026-10-19): 「접수 대기 현황 영역을 제거하고, QR 창만 메인 페이지가
+  **스크롤 없이 꽉 차게** 표기」 → 현황(#rm)은 숨기고(지우지 않는다 — §3-5) 조회도 멈췄다.
+  QR 크기는 **남은 높이·폭에서 계산**해 다시 그린다(창 크기가 바뀌면 따라간다).
+
+  사용자 지시(2026-10-16): 「데스크-키오스크 탭 버튼 누르면 새창으로 키오스크 페이지 뜨는
+  것을 **취소**하고, 접수 대기 현황 페이지만 표기되고, **우측 상단의 「키오스크 창 열기」
+  버튼**을 눌러서 새창이 뜨는 것으로 변경」 · 「**문진** 접수 대기 현황 → **접수 대기 현황**」
+
+  🔴 **셸은 키오스크 창을 자동으로 열지 않는다.** 탭을 누르면 이 현황 화면만 뜬다.
+     키오스크(desk-kiosk.html)를 여는 길은 **우측 상단 버튼 하나뿐**이다 —
+     그 버튼은 사용자 클릭 안에서 열리므로 팝업 차단도 받지 않는다.
+     ⚠️ 이전(2026-10-15)에는 셸이 탭 클릭에서 바로 열었다. 현황만 보려던 데스크 PC 에도
+        키오스크 창이 끼어들어 취소했다.
+  🔴 모니터 그리기는 `kiosk-monitor.js` 하나뿐이다(키오스크 본창과 공용).
+-->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>접수 대기 현황</title>
+<style>
+  html,body{height:100%;margin:0;background:#f9fafb;overflow:hidden}
+  body{display:flex;flex-direction:column}
+  .bar{display:flex;align-items:center;gap:12px;padding:10px 24px;background:#fff;
+    border-bottom:1px solid #e5e7eb;font:14px Pretendard,system-ui,sans-serif;color:#6b7280}
+  .bar span{flex:1}
+  .bar button{font:700 14px Pretendard,system-ui,sans-serif;border:0;border-radius:10px;
+    background:#3182f6;color:#fff;padding:10px 16px;cursor:pointer}
+  .bar button:hover{background:#1b64da}
+  .bar.warn{background:#fff7e0;color:#6b5a24}
+  .bar button.ghost{background:#fff;color:#3182f6;box-shadow:inset 0 0 0 1px #c9ddff}
+  .bar button.ghost:hover{background:#f0f6ff}
+
+  /* ── 환자 접수 QR ───────────────────────────────────────────── */
+  /* 🔴 남은 공간을 **전부** QR 카드가 쓴다 — 바(.bar)를 뺀 높이(flex:1). 스크롤 없음. */
+  .qrwrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:stretch;padding:16px 24px}
+  .qrcard{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:#fff;border:1px solid #e5e7eb;border-radius:20px;
+    padding:20px 24px;text-align:center;font:14px Pretendard,system-ui,sans-serif;box-sizing:border-box}
+  .qrclinic{font-weight:800;font-size:clamp(18px,3.2vh,34px);color:#111827;margin-bottom:12px}
+  .qrbox{line-height:0;flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
+  .qrbox svg{display:block;margin:0 auto;max-width:100%;max-height:100%}
+  .qrsay{margin-top:12px;font-weight:800;font-size:clamp(16px,2.8vh,30px);color:#111827}
+  .qrurl{margin-top:6px;font-size:12px;color:#9ca3af;word-break:break-all}
+  #rm{display:none}   /* 접수 대기 현황 — 사용자 지시로 숨김(2026-10-19). 지우지 않는다. */
+
+  /* 🔴 **인쇄하면 QR 카드만 남는다**(사용자 지시 2026-10-16: 「QR 이미지만 인쇄」).
+     현황표·버튼이 같이 찍히면 종이가 낭비되고 환자가 무엇을 봐야 할지 모른다.
+     ⚠️ 요소를 **지우지 않고 숨긴다** — 지우면 스크립트가 찾다가 터진다(CLAUDE.md §3-5). */
+  @media print {
+    .bar, #rm { display: none !important; }
+    .qrwrap { padding: 0; }
+    html, body { height: auto; overflow: visible; }
+    .qrcard { border: 0; padding: 0; }
+    .qrbox svg { width: 90mm; height: 90mm; }   /* 화면 크기와 무관하게 종이엔 일정한 크기 */
+    .qrurl  { color: #6b7280; }
+    @page { margin: 16mm; }
+  }
+</style>
+<div class="bar" id="bar">
+  <span id="say">환자는 아래 QR 을 휴대폰으로 찍어 접수합니다</span>
+  <!-- 🔴 순서를 지킨다 — **QR 인쇄가 왼쪽, 접수 창이 오른쪽**(사용자 지시 2026-10-16). -->
+  <button id="print" class="ghost">QR코드 인쇄</button>
+  <button id="open">접수 창 열기</button>
+</div>
+
+<!-- ── 환자 접수 QR ──────────────────────────────────────────────────
+  🔴 환자가 **캡처해서** 자기 폰으로 연다. 가리키는 곳은 `kiosk-patient.html`
+     (처음방문·재방문만 · 카메라 없음) — 얼굴 인식은 이 PC 의 새 창이 맡는다.
+  ⚠️ 주소는 **지금 열려 있는 주소**에서 만든다. 서버 IP·포트가 치과마다 다르고,
+     localhost 로 박아 두면 환자 폰에서 **자기 폰을 가리켜** 열리지 않는다. -->
+<div class="qrwrap" id="qrwrap">
+  <div class="qrcard" id="qrcard">
+    <div class="qrclinic" id="qrclinic">접수</div>
+    <div class="qrbox" id="qrbox"></div>
+    <div class="qrsay">접수하기</div>
+    <div class="qrurl" id="qrurl"></div>
+  </div>
+</div>
+
+<div id="rm" hidden></div>
+<script src="kiosk-monitor.js"></script>
+<script src="qr-mini.js"></script>
+<script>
+'use strict'
+
+/* ══ 로그인 토큰 자동 첨부 (2026-10-19) — iframe 독립 문서라 셸 래퍼가 안 닿는다.
+   localStorage['mw_token'] 를 /api 계열 호출에 Bearer 로 붙이고, 401 이면 최상위 창을
+   /login 으로 보낸다(같은 출처만). 상세는 desk-lounge.html 머리말 참조. */
+;(function(){ /* 🔴 앞의 'use strict' 와 붙으면 "'use strict'(function(){…})" 호출로 읽혀 스크립트 전체가 죽는다(2026-10-19 실측) — 세미콜론 필수 */
+  var token=''; try{ token=localStorage.getItem('mw_token')||'' }catch(e){}
+  var orig=window.fetch;
+  function isApi(u){ try{ var x=new URL(u,location.href); return x.origin===location.origin && /^\/(api|api-v0|api-v1|api-v3)\//.test(x.pathname) }catch(e){ return false } }
+  var redir=false;
+  window.fetch=function(input,init){
+    var u=typeof input==='string'?input:(input&&input.url)||'';
+    if(token && isApi(u)){ init=init||{}; var h=new Headers(init.headers||(typeof input!=='string'&&input.headers)||{}); if(!h.has('authorization')) h.set('authorization','Bearer '+token); init.headers=h; if(!init.credentials) init.credentials='same-origin'; }
+    return orig.call(this,input,init).then(function(r){
+      if(r && r.status===401 && isApi(u) && !/\/api\/auth\//.test(u) && !redir){ redir=true; var from=location.pathname+location.search+location.hash; (window.top||window).location.replace('/login?from='+encodeURIComponent(from)); }
+      return r;
+    });
+  };
+})();
+let clinic = ''
+async function loadClinic() {
+  try {
+    const j = await (await fetch(location.origin + '/api-v1/kiosk/clinic')).json()
+    clinic = (j && j.ok && j.data && j.data.name) || ''
+  } catch { /* 이름이 없어도 모니터는 그린다 */ }
+  /* 🔴 인쇄물에 **병원 이름**을 넣는다(사용자 지시 2026-10-16) — 대기실 벽에 붙으면
+     어느 병원 것인지 알아야 한다. 못 받아 왔으면 「접수」만 남긴다(빈 줄을 두지 않는다). */
+  if (clinic) document.getElementById('qrclinic').textContent = clinic
+}
+/* ── 환자 접수 QR ───────────────────────────────────────────────────
+   🔴 **지금 열려 있는 주소**에서 만든다. 치과마다 서버 IP·포트가 다르고,
+      박아 두면 다른 병원에서 엉뚱한 곳을 가리킨다.
+   ⚠️ `127.0.0.1`·`localhost` 로 열려 있으면 그 QR 은 **환자 폰에서 자기 폰을
+      가리킨다** — 열리지 않는다. 그래서 LAN 주소로 열라고 알려 준다. */
+const PATIENT_PATH = '/view-v1/pages/kiosk-patient.html'
+function drawQR() {
+  const host = location.hostname
+  const local = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(host)
+  const url = location.origin + PATIENT_PATH
+  document.getElementById('qrurl').textContent = url
+  const box = document.getElementById('qrbox')
+  if (local) {
+    /* 🔴 **그리지 않는다.** 안 되는 QR 을 인쇄해 벽에 붙이면 환자가 접수를 못 한다 —
+       「조용히 틀린 것」보다 「무엇을 해야 하는지」를 적는 편이 낫다. */
+    box.innerHTML = '<div style="font:13px Pretendard,system-ui,sans-serif;color:#b45309;'
+      + 'max-width:260px;line-height:1.5">이 주소(' + host + ')로 만든 QR 은 환자 폰에서 열리지 않아요. '
+      + '서버의 <b>LAN 주소</b>(예: https://192.168.0.N1:8331)로 이 화면을 열어 주세요.</div>'
+    document.getElementById('print').disabled = true
+    return
+  }
+  const mods = QRMini.encode(url)
+  if (!mods) { box.textContent = 'QR 을 만들지 못했어요' ; return }
+  /* 남은 칸(.qrbox)의 짧은 변에 맞춘다 — 상한 없이 화면을 꽉 채우되 넘치지 않게. */
+  const r = box.getBoundingClientRect()
+  const size = Math.max(160, Math.floor(Math.min(r.width, r.height)))
+  box.innerHTML = QRMini.svg(mods, size)
+}
+let rsz = 0
+window.addEventListener('resize', () => { clearTimeout(rsz); rsz = setTimeout(drawQR, 120) })
+
+/* 🔴 인쇄는 **이 창 그대로** 띄운다(@media print 가 QR 만 남긴다).
+   새 창을 열면 팝업 차단에 걸리고, 차단되면 아무 일도 안 나 「고장」으로 읽힌다. */
+document.getElementById('print').addEventListener('click', () => window.print())
+
+/* 🔴 접수 대기 현황은 숨겼으므로 **조회도 하지 않는다**(사용자 지시 2026-10-19).
+   15초 폴링을 남겨 두면 안 보이는 표를 위해 덴트웹을 계속 두드린다. */
+drawQR()
+loadClinic().then(drawQR)
+
+/* 키오스크 창 — 셸과 **같은 함수**로 연다(이름·크기를 두 벌로 두지 않는다). */
+document.getElementById('open').addEventListener('click', () => {
+  const w = parent && parent.MQ_openKiosk ? parent.MQ_openKiosk() : null
+  if (!w) {
+    document.getElementById('bar').classList.add('warn')
+    document.getElementById('say').textContent = '접수 창이 막혔어요 — 주소창 오른쪽의 팝업 차단 아이콘에서 이 사이트를 허용해 주세요'
+  }
+})
+/* 🔴 **「아직 안 열렸다」를 경고로 띄우지 않는다**(사용자 지시 2026-10-16).
+   셸이 더 이상 자동으로 열지 않으므로, 안 열린 것은 **정상 상태**다 — 경고로 띄우면
+   매번 노란 띠가 떠서 「고장」으로 읽힌다.
+   ⚠️ 팝업이 실제로 **차단된 경우**(위 버튼을 눌렀는데 안 열림)만 경고가 뜬다. */
+</script>

@@ -1,0 +1,733 @@
+<!--
+  환자 폰 전용 접수 — **QR 로 들어온다**(사용자 결정 2026-10-16).
+
+  🔴 **얼굴 인식이 없다.** 환자 개인 폰에서는 세 가지가 동시에 막는다:
+     ① 사설 CA(mkcert)를 환자 폰에 심을 수 없어 **인증서 경고** → `getUserMedia` 차단
+        (경고를 무시해도 카메라는 안 열린다 — 보안 컨텍스트가 아니다)
+     ② 얼굴 인식은 「이 사람이 누구인가」를 푸는 기능인데, **자기 폰**이면 이미 안다
+     ③ 환자 폰을 내부망에 넣는 것 자체가 위험하다(아래)
+     → 얼굴 인식은 **데스크 PC 의 새 창**(`desk-kiosk.html` · 세 갈래 전부)이 맡는다.
+
+  🔴 **재방문 조회는 `/api-v1/kiosk/lookup` 만 쓴다.** `…/kiosk/patients` 를 쓰지 않는다 —
+     그쪽은 **부분 일치로 목록**을 준다(실측 2026-10-16: 「김」 한 글자에 **30명**이
+     이름·휴대폰·생년월일과 함께). 데스크 화면 3곳이 함께 쓰는 공용 경로라
+     환자에게 열면 그 전부를 여는 셈이다. 여기서는 **이름 완전일치 + 전화 뒷4자리**로
+     **1명일 때만** 확인한다.
+
+  ⚠️ **이 화면이 부르는 경로만** 게스트망 화이트리스트에 넣는다:
+       /api-v1/kiosk/clinic · /api-v1/kiosk/lookup
+       /api-v1/kiosk/checkin · /api-v1/kiosk/intake-token
+     🔴 `face-ready`·`identify`·`patients` 는 **넣지 않는다.**
+
+  🔴 **앱 인증만으로는 못 막는다.** 환자 폰이 내부망에 있으면 `if lan { return true; }`
+     (server/mod.rs)로 `/api/dw/*` 가 토큰 없이 열린다 — 실측으로 접수 52명의
+     이름·휴대폰·생년월일이 나왔다. **게스트망 분리(A안)가 주 방어선**이고 토큰은 보조다.
+-->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>접수</title>
+<script>
+/* ── vibe-deploy 전용 덧댐 — 원본에는 없다 ──────────────────────────────
+   🔴 이 HTML 은 **:4000** 에서 서빙되는데 접수·문진 API 는 **서버 앱**에 있다.
+      상대 경로로 부르면 :4000 을 때려 전부 404 다 — 그래서 베이스를 붙인다.
+   ⚠️ 주소가 다른 치과면 **이 한 줄만** 고치면 된다. */
+/* 🔴 **복사본이다** — 원본은 `vibe/sites/kiosk/index.html`(사용자가 업로드한 것).
+   사용자 지시 2026-10-15: 「바이브코딩 의 kiosk 를 **copy 하여** 실제 api-v1 를
+   활용하여 동작하도록 구성하시오」 → 업로드물은 **고치지 않고**, 이 사본만 고친다.
+
+   🔴 원본은 `'https://192.168.0.N1'`(포트 없음)을 박아 두었다 — 다른 PC·운영
+      서버에서 열면 **엉뚱한 호스트**를 부른다. 사본은 **자기가 열린 주소**를 쓴다.
+      그래야 서버를 옮겨도, 포트가 달라도 따라간다. */
+window.__API_BASE__ = window.__API_BASE__ || location.origin;
+/* 🔴 **API 는 전부 `/api-v1/kiosk/*` 를 쓴다** (사용자 지시 2026-10-15:
+   「`#/desk/kiosk` 로 접속하여 사용하는 api 는 **모두 api-v1 에서 관리**해야 합니다」).
+   서버는 **같은 핸들러**를 `/api/kiosk/*` 와 `/api-v1/kiosk/*` 양쪽에 걸어 둔다 —
+   기존 데스크·앱이 쓰는 `/api/kiosk/*` 를 깨지 않으면서 이 화면만 레인을 옮긴 것이다.
+   ⚠️ 원본(업로드물)은 `/api/kiosk/*` 그대로다. **여긴 사본이라 고쳐도 된다.** */
+function API(p){
+  // 이미 절대 URL 이면 그대로 둔다(토큰페이지 링크 등).
+  if(/^https?:\/\//i.test(p)) return p;
+  return window.__API_BASE__.replace(/\/+$/,'') + p;
+}
+</script>
+
+<!-- 🔴 CDN 없음 — 병원 내부망은 인터넷이 없을 수 있다(/management/ops 와 같은 규칙). -->
+<!--
+  키오스크 — 환자가 **혼자, 설명 없이, 한 번에** 쓰는 화면.
+
+  🔴 데스크 화면과 규율이 다르다. 옆에 알려 줄 직원이 없다.
+     · 글자는 크게(기본 17px, 버튼 제목 23px) — 서서 팔 뻗은 거리에서 읽는다.
+     · 누를 것은 크게(최소 높이 64px) — 손가락으로, 장갑 끼고, 어르신도 누른다.
+     · 되돌아갈 길을 **모든 화면에** 둔다 — 잘못 들어갔을 때 직원을 부르지 않게.
+     · 60초 동안 안 만지면 **첫 화면으로 돌아간다** — 앞사람 이름이 남아 있으면
+       개인정보가 다음 사람에게 보인다.
+  🔴 **얼굴로 찾아도 본인이 이름을 보고 확인해야** 접수된다 — 틀린 환자로 접수하면
+     다른 사람 진료 대기열에 들어간다. UX 버그가 아니라 환자안전 사고다.
+-->
+<style>
+  :root{
+    /* /management/ops 와 **같은 토큰**이다 — 같은 앱이 두 벌로 보이지 않게. */
+    --bg:#f2f4f6; --card:#fff; --line:#e5e8eb; --tx:#191f28; --dim:#8b95a1;
+    --blue:#3182f6; --blue-d:#1b64da; --blue-bg:#eff6ff; --blue-line:#c9e0ff;
+    --red:#f04452; --red-bg:#fff4f4; --red-line:#ffd0d0;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font:17px/1.6 Pretendard,-apple-system,system-ui,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    /* 키오스크는 글자를 끌어 선택할 일이 없다 — 길게 눌러 생기는 선택 UI 를 막는다. */
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 40px;min-height:100%;
+    display:flex;flex-direction:column}
+
+  /* ── 첫 화면 — 화면 전체가 버튼이다 ────────────────────────────────── */
+  /* 🔴 파랑 계열이다(사용자 지시 2026-10-07). 초록은 「완료」로 읽혀
+     「지금 누르세요」가 약해진다. */
+  #home{position:fixed;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:22px;cursor:pointer;
+    background:linear-gradient(160deg,#eff6ff 0%,#dbeafe 48%,#bfdbfe 100%)}
+  #home .logo{font-size:19px;font-weight:700;color:var(--blue-d);letter-spacing:-.4px;
+    opacity:.85}
+  #home .big{font-size:min(8.4vw,46px);font-weight:800;letter-spacing:-1.4px;
+    color:#0f357a;text-align:center;line-height:1.35}
+  #home .sub{font-size:min(4.4vw,19px);color:#2a5bb0;opacity:.85;text-align:center}
+  /* 손가락 그림 대신 **원이 숨 쉬는** 표시 — 그림을 안 쓰면 번역·해상도 문제가 없다. */
+  #home .pulse{width:116px;height:116px;border-radius:50%;background:var(--blue);
+    opacity:.14;animation:pp 2.2s ease-in-out infinite}
+  @keyframes pp{0%,100%{transform:scale(1);opacity:.14}50%{transform:scale(1.16);opacity:.24}}
+  @media (prefers-reduced-motion:reduce){#home .pulse{animation:none}}
+
+  /* ── 공통 ─────────────────────────────────────────────────────────── */
+  header{display:flex;align-items:center;gap:12px;padding:2px 2px 18px}
+  header b{font-size:22px;letter-spacing:-.5px}
+  header .sp{flex:1}
+  .back{font:600 15px Pretendard,system-ui,sans-serif;background:#fff;color:var(--tx);
+    border:1px solid var(--line);border-radius:12px;padding:11px 16px;cursor:pointer;
+    width:auto;min-height:0}
+  .back:hover{background:#f7f8f9}
+
+  .step{display:none;flex:1;flex-direction:column}
+  .step.on{display:flex}
+
+  /* 큰 선택 버튼 3개 */
+  .pick{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+  .pick button{display:flex;align-items:center;gap:18px;text-align:left;
+    background:var(--card);border:1.5px solid var(--blue-line);border-radius:18px;
+    padding:24px 26px;cursor:pointer;width:100%;min-height:104px;
+    font:inherit;color:var(--tx);transition:border-color .12s,transform .06s}
+  .pick button:hover{border-color:var(--blue);background:#fbfdff}
+  .pick button:active{transform:scale(.993)}
+  .pick button:disabled{opacity:.5;cursor:default;border-color:var(--line)}
+  .pick .ic{width:58px;height:58px;border-radius:16px;background:var(--blue-bg);
+    display:flex;align-items:center;justify-content:center;flex:none;
+    font-size:27px;color:var(--blue-d)}
+  .pick .tt{font-size:23px;font-weight:800;letter-spacing:-.5px;display:block}
+  .pick .dd{font-size:14.5px;color:var(--dim);display:block;margin-top:3px;font-weight:500}
+
+  /* 입력 */
+  label{display:block;font-size:15px;color:var(--dim);margin:20px 0 8px;font-weight:600}
+  input{width:100%;font:19px Pretendard,system-ui,sans-serif;padding:18px 18px;
+    border:1.5px solid var(--line);border-radius:14px;background:#fff}
+  input:focus{outline:0;border-color:var(--blue)}
+
+  button.go{font:700 19px Pretendard,system-ui,sans-serif;padding:19px 18px;border:0;
+    border-radius:14px;background:var(--blue);color:#fff;cursor:pointer;width:100%;
+    margin-top:18px;min-height:64px}
+  button.go:hover{background:var(--blue-d)}
+  button.go:disabled{background:#d1d6db;cursor:default}
+  button.ghost{background:#fff;color:var(--tx);border:1.5px solid var(--line)}
+  button.ghost:hover{background:#f7f8f9}
+
+  /* 검색 결과 / 확인 카드 */
+  .hit{display:flex;align-items:center;gap:14px;background:var(--card);
+    border:1.5px solid var(--line);border-radius:16px;padding:19px 20px;cursor:pointer;
+    width:100%;font:inherit;color:var(--tx);text-align:left;min-height:76px}
+  .hit:hover{border-color:var(--blue);background:#fbfdff}
+  /* 🔴 **줄을 반드시 나눈다.** `<span>` 은 inline 이라 margin-top 이 안 먹어
+     「김준석차트번호 8383」처럼 붙어 나왔다(실측 2026-10-07). 동명이인일 때
+     차트번호는 **두 사람을 가르는 유일한 단서**라 붙어 있으면 잘못 고른다. */
+  .hit .nm{font-size:20px;font-weight:700;letter-spacing:-.3px;display:block}
+  .hit .meta{font-size:14px;color:var(--dim);margin-top:3px;display:block}
+
+  .confirm{background:var(--card);border:1.5px solid var(--blue-line);border-radius:18px;
+    padding:28px 24px;text-align:center;margin-top:6px}
+  .confirm .nm{font-size:34px;font-weight:800;letter-spacing:-1px}
+  .confirm .meta{font-size:15px;color:var(--dim);margin-top:6px}
+  .confirm .ask{font-size:17px;color:var(--tx);margin-top:18px}
+  .two{display:flex;gap:10px;margin-top:18px}
+  .two button{margin-top:0}
+
+  /* 카메라 */
+  .cam{position:relative;background:#0b1220;border-radius:18px;overflow:hidden;
+    aspect-ratio:4/3;max-height:46vh;margin-top:6px;
+    display:flex;align-items:center;justify-content:center}
+  .cam video{width:100%;height:100%;object-fit:cover;
+    /* 🔴 거울로 보여 준다 — 안 뒤집으면 「내가 왼쪽으로 가면 화면은 오른쪽」이라
+       얼굴을 맞추지 못한다. 보내는 프레임은 뒤집지 않는다(인식에 영향 없음). */
+    transform:scaleX(-1)}
+  .cam .guide{position:absolute;width:52%;aspect-ratio:3/4;border:3px dashed rgba(255,255,255,.55);
+    border-radius:50%;pointer-events:none}
+  .cam .camsay{position:absolute;bottom:0;left:0;right:0;padding:13px;text-align:center;
+    color:#fff;font-size:15px;background:linear-gradient(transparent,rgba(0,0,0,.6))}
+
+  .note{font-size:15px;color:var(--dim);margin-top:16px;line-height:1.6;text-align:center}
+  .err{background:var(--red-bg);border:1px solid var(--red-line);color:#8a1c24;
+    border-radius:14px;padding:15px 17px;font-size:15.5px;margin-top:16px;line-height:1.55}
+
+  /* 완료 */
+  .done{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:14px}
+  .done .mark{width:98px;height:98px;border-radius:50%;background:var(--blue-bg);
+    color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:52px}
+  .done .big{font-size:33px;font-weight:800;letter-spacing:-.9px}
+  .done .sub{font-size:18px;color:var(--dim)}
+  .done .wait{font-size:17px;color:var(--blue-d);background:var(--blue-bg);
+    border-radius:14px;padding:14px 22px;margin-top:4px}
+  .done .note-intake{font-size:18px;line-height:1.55;color:var(--tx);background:#fff;
+    border:1.5px solid var(--line);border-radius:14px;padding:16px 22px;margin-top:6px}
+  .done .count{font-size:15px;color:var(--dim);margin-top:2px}
+  .foot{text-align:center;color:var(--dim);font-size:13px;padding-top:18px}
+
+  /* 문진 — 화면을 꽉 채운다(키오스크는 이 화면만 보인다) */
+  /* 🔴 `[hidden]` 이 **이겨야 한다.** `display:flex` 가 그대로면 `hidden=true` 를
+     줘도 화면에 남아, 응급 안내가 **빈 iframe 에 가려진다**(실측 2026-10-08). */
+  #intake{position:fixed;inset:0;background:#fff;display:flex;flex-direction:column;z-index:50}
+  #intake[hidden]{display:none}
+  /* 🔴 iframe 을 쓰지 않는다(2026-10-15 사용자 지시) — 문진(view.4prism)은 **새 창**으로 연다.
+     view.4prism 은 `frame-ancestors` 로 허용한 출처(`https://192.168.0.N1`)에서만 iframe 을
+     허락해서, `:8331` 키오스크에서는 브라우저가 문진을 막고 빈 화면만 남았다(실측).
+     그 자리에는 「문진 대기 모니터」 **사본**(QR 제외)을 띄운다 — 아래 rm* 스타일. */
+  #rm{flex:1;overflow:auto;background:#f9fafb}
+  /* 문진 대기 모니터 사본의 스타일·그리기는 `kiosk-monitor.js` 한 곳에 있다(모니터 iframe 과 같이 쓴다). */
+  /* 완료 화면의 「문진 작성하기」 — 새 창은 **환자가 누른 그 순간**에만 열린다(팝업 차단) */
+  .done .go-intake{margin-top:10px;width:auto;padding:16px 28px;font-size:19px}
+  /* 🔴 **그만하기**를 항상 띄운다. 환자가 중간에 못 빠져나오면 다음 사람이 못 쓴다. */
+  .ibar{display:flex;align-items:center;gap:12px;padding:10px 16px;
+    border-top:1px solid var(--line);background:var(--bg);font-size:14px;color:var(--dim)}
+  .ibar span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .iclose{width:auto;min-height:0;padding:10px 16px;font:600 14px Pretendard,system-ui,sans-serif;
+    background:#fff;color:var(--tx);border:1px solid var(--line);border-radius:10px;cursor:pointer}
+  .iclose:hover{background:#f7f8f9}
+</style>
+
+<!-- ── 0. 첫 화면 ──────────────────────────────────────────────────── -->
+<div id="home">
+  <!-- 🔴 이름은 **덴트웹에서 읽어** 채운다(아래 loadClinic). 코드에 박으면
+       다른 치과에 깔았을 때 남의 병원 이름이 환자에게 보인다. -->
+  <div class="logo" id="clinicName"></div>
+  <div class="pulse"></div>
+  <div class="big">화면을 눌러<br>접수하세요</div>
+  <div class="sub">편하게 눌러 주세요</div>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <header>
+    <b id="ttl">접수</b><span class="sp"></span>
+    <button class="back" id="back" hidden>처음으로</button>
+  </header>
+
+  <!-- ── 1. 세 갈래 ───────────────────────────────────────────────── -->
+  <div class="step on" id="s-pick">
+    <div class="pick">
+      <button data-go="new">
+        <span class="ic">＋</span>
+        <span><span class="tt">처음 방문</span>
+          <span class="dd">오늘 처음 오셨어요</span></span>
+      </button>
+      <button data-go="name">
+        <span class="ic">⌨</span>
+        <span><span class="tt">재방문</span>
+          <span class="dd">이름과 전화 뒷 4자리로 찾아요</span></span>
+      </button>
+    </div>
+    <div class="note">도움이 필요하시면 데스크 직원을 불러 주세요.</div>
+  </div>
+
+  <!-- ── 2. 이름·전화로 찾기 ──────────────────────────────────────── -->
+  <div class="step" id="s-name">
+    <!-- 🔴 **목록을 주지 않는다.** 이름 완전일치 + 전화 뒷4자리로 **1명일 때만** 확인한다
+         (사용자 결정 2026-10-16). 부분 검색은 그 자체가 명부 조회가 된다. -->
+    <label for="q">이름</label>
+    <input id="q" inputmode="text" autocomplete="off" placeholder="예) 홍길동">
+    <label for="p4">전화 뒷 4자리</label>
+    <input id="p4" inputmode="numeric" autocomplete="off" maxlength="4"
+           pattern="[0-9]*" placeholder="예) 5678">
+    <button class="go" id="btnFind">찾기</button>
+    <div id="nameErr"></div>
+  </div>
+
+  <!-- ── 4. 본인 확인 ─────────────────────────────────────────────── -->
+  <!-- 🔴 얼굴로 찾았든 이름으로 찾았든 **여기를 반드시 지난다.** -->
+  <div class="step" id="s-ok">
+    <div class="confirm">
+      <div class="nm" id="okName">—</div>
+      <div class="meta" id="okMeta"></div>
+      <div class="ask">본인이 맞으신가요?</div>
+      <div class="two">
+        <button class="go ghost" id="btnNo">아니에요</button>
+        <button class="go" id="btnYes">네, 접수할게요</button>
+      </div>
+    </div>
+    <div id="okErr"></div>
+  </div>
+
+  <!-- ── 5. 처음 방문 ─────────────────────────────────────────────── -->
+  <div class="step" id="s-new">
+    <label for="nName">성함</label>
+    <input id="nName" autocomplete="off" placeholder="예) 홍길동">
+    <label for="nPhone">전화번호</label>
+    <input id="nPhone" inputmode="numeric" autocomplete="off" placeholder="01012345678">
+    <button class="go" id="btnNew">접수하기</button>
+    <div id="newErr"></div>
+  </div>
+
+  <!-- ── 6. 완료 ──────────────────────────────────────────────────── -->
+  <div class="step" id="s-done">
+    <div class="done">
+      <div class="mark" id="doneMark">✓</div>
+      <div class="big" id="doneName">접수되었습니다</div>
+      <!-- ⚠️ 응급일 때는 이 문구를 바꾼다 — 「곧 불러 드릴게요」는 **기다리라는 말**이라
+           응급 환자에게 정반대 신호가 된다. -->
+      <div class="sub" id="doneSub">잠시 기다려 주세요. 곧 불러 드릴게요.</div>
+      <div class="wait" id="doneWait" hidden></div>
+      <!-- 🔴 문진 안내 — 접수 세 갈래(얼굴·처음 방문·재방문) **모두 같은 문구**(사용자 지시 2026-10-15).
+           키오스크에서는 문진 토큰페이지를 띄우지 않는다. -->
+      <div class="note-intake" id="doneIntake">오늘 진료에 필요한 문진이 있으면<br>알림톡 또는 데스크에서 안내드릴게요</div>
+      <div class="count" id="doneCount"></div>
+      <button class="go go-intake" id="btnIntake" hidden>문진 작성하기</button>
+    </div>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<!-- ── 7. 문진 — 🔴 **토큰페이지를 새 창으로 띄운다**(2026-10-15) ─────────────
+  화면을 복제하지 않는다. 문진 문항은 토큰페이지 한 곳에만 있고, 복제하면
+  한쪽만 고쳐지는 순간 같은 환자가 **알림톡과 키오스크에서 다른 문진**을 받는다.
+  🔴 iframe 을 쓰지 않는다 — view.4prism 의 `frame-ancestors` 가 이 출처(:8331)를 허락하지
+     않아 브라우저가 문진을 막았다. 새 창은 그 제약을 받지 않는다.
+  이 자리(문진이 열려 있는 동안 키오스크 본창)에는 문진 대기 모니터 **사본**을 띄운다. -->
+<div id="intake" hidden>
+  <div id="rm"></div>
+  <div class="ibar">
+    <span id="intakeSay">문진을 불러오는 중…</span>
+    <button class="iclose" id="intakeClose">그만하기</button>
+  </div>
+</div>
+
+<script src="kiosk-monitor.js"></script>
+<script>
+'use strict'
+const $ = id => document.getElementById(id)
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+
+/* 🔴 선택한 환자. **접수 직전까지만** 들고 있다가 반드시 지운다 —
+   앞사람 이름이 남으면 다음 사람에게 보인다. */
+let PICK = null
+let stream = null
+
+/* ── 화면 전환 ──────────────────────────────────────────────────── */
+const TITLES = { pick:'접수', name:'재방문 접수',
+                 ok:'본인 확인', new:'처음 방문', done:'접수 완료' }
+function show(k) {
+  document.querySelectorAll('.step').forEach(e => e.classList.remove('on'))
+  $('s-' + k).classList.add('on')
+  // ⚠️ 치과 이름을 받았으면 **덮어쓰지 않는다**. 「접수」로 갈아치우면 환자가
+  //    어느 병원인지 알 수 없게 된다(키오스크는 그 자리에 서 있는 사람만 본다).
+  const clinic = $('clinicName').textContent.trim()
+  $('ttl').textContent = clinic || TITLES[k] || '접수'
+  // 첫 화면과 완료 화면에는 「처음으로」를 숨긴다(완료는 자동으로 돌아간다).
+  $('back').hidden = (k === 'pick' || k === 'done')
+  idle()
+}
+
+/* ── 자동 복귀 ──────────────────────────────────────────────────── */
+/* 🔴 **개인정보 보호 장치다.** 환자가 중간에 떠나면 이름이 화면에 남는다.
+   60초(완료 화면은 8초) 뒤 첫 화면으로 돌아가며 입력을 **전부 지운다**. */
+let idleT = null
+function idle(ms) {
+  clearTimeout(idleT)
+  // 🔴 **문진 중에는 복귀 타이머를 걸지 않는다.** 환자가 글을 읽고 답하는 사이
+  //    화면이 첫 화면으로 날아가면 **처음부터 다시** 해야 한다(실제로 가장 긴
+  //    화면이 문진이다). 끝나거나 그만둘 때 다시 건다.
+  if (intakeOn) return
+  idleT = setTimeout(reset, ms || 60000)
+}
+function reset() {
+  clearTimeout(idleT)
+  PICK = null
+  // ⚠️ 문진이 열린 채 돌아가지 않게 **같이 닫는다** — 앞사람 문진이 남으면
+  //    다음 사람이 그 화면을 본다.
+  stopIntake()
+  stopCount()
+  // ⚠️ 응급 표시를 **되돌린다** — 안 되돌리면 다음 환자가 🚨 를 본다.
+  $('doneMark').textContent = '✓'
+  $('doneSub').textContent = '잠시 기다려 주세요. 곧 불러 드릴게요.'
+  $('q').value = ''; $('p4').value = ''
+  $('nName').value = ''; $('nPhone').value = ''
+  ;['nameErr','okErr','newErr'].forEach(i => $(i).innerHTML = '')
+  $('app').hidden = true
+  $('home').style.display = 'flex'
+  document.querySelectorAll('.step').forEach(e => e.classList.remove('on'))
+  $('s-pick').classList.add('on')
+}
+function err(box, msg) { $(box).innerHTML = '<div class="err">' + esc(msg) + '</div>' }
+
+/* 첫 화면 — 아무 데나 누르면 시작 */
+/* ── 전체화면 ──────────────────────────────────────────────────── */
+/* 🔴 키오스크는 **전체화면**으로 띄운다(사용자 지시 2026-10-15) — 환자 앞에 좌측 탭·주소창이
+   보이면 다른 화면으로 넘어간다. 브라우저는 **사용자 동작 없이는** 전체화면을 허락하지 않으므로
+   첫 화면을 누르는 순간마다 다시 건다(문진 새 창을 열면 크롬이 전체화면을 풀기 때문이다).
+   ⚠️ 이 문서는 셸(#/desk/kiosk)의 iframe 안이다 — 그 iframe 에 `allow="fullscreen"` 이 있어야
+      한다(legacy-runtime.js). 이 문서를 전체화면으로 올리면 셸(좌측 탭·헤더)이 가려진다.
+   ⚠️ 실패해도 접수는 그대로 돈다(전체화면은 보조). */
+function enterFullscreen() {
+  try {
+    if (document.fullscreenElement) return
+    const el = document.documentElement
+    const p = el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : null
+    if (p && p.catch) p.catch(e => console.log('[kiosk] 전체화면 실패', String(e && e.message || e)))
+  } catch (e) { console.log('[kiosk] 전체화면 실패', String(e && e.message || e)) }
+}
+
+$('home').addEventListener('click', () => {
+  enterFullscreen()
+  $('home').style.display = 'none'
+  $('app').hidden = false
+  show('pick')
+  })
+$('back').addEventListener('click', reset)
+document.addEventListener('touchstart', () => { if (!$('app').hidden) idle() }, {passive:true})
+document.addEventListener('click', () => { if (!$('app').hidden) idle() })
+
+/* ── 치과 이름 ──────────────────────────────────────────────────── */
+/* 🔴 덴트웹 `TB_병원기본정보.sz치과이름` 이 유일한 출처다. 서버 앱은 치과 1곳당
+   1대로 깔리므로 이름을 코드에 박으면 다른 치과에서 남의 이름이 뜬다.
+   ⚠️ 못 읽어도 **화면은 그대로 돈다** — 그 자리를 비울 뿐이다. 이름 하나 때문에
+      접수가 막히면 안 된다. */
+async function loadClinic() {
+  try {
+    const r = await fetch(API('/api-v1/kiosk/clinic'))
+    const t = await r.text()
+    let j = null; try { j = JSON.parse(t) } catch {}
+    const nm = (j && j.ok && j.data && j.data.name) || ''
+    if (!nm) return
+    $('clinicName').textContent = nm
+    $('ttl').textContent = nm          // 헤더도 같은 이름으로
+    document.title = nm + ' 접수'
+  } catch { /* 이름이 없어도 접수는 된다 */ }
+}
+loadClinic()
+
+/* ── 갈래 선택 ──────────────────────────────────────────────────── */
+document.querySelectorAll('[data-go]').forEach(b => {
+  b.addEventListener('click', () => {
+    const g = b.dataset.go
+    if (g === 'name') { show('name'); $('q').focus() }
+    else { show('new'); $('nName').focus() }
+  })
+})
+
+/* ── 재방문 본인 확인 ───────────────────────────────────────────── */
+/* 🔴 **검색이 아니라 확인이다**(사용자 결정 2026-10-16). 이름 완전일치 + 전화 뒷4자리로
+   서버가 **1명일 때만** 돌려준다. 목록을 받지 않으므로 화면에 그릴 후보도 없다.
+   ⚠️ 서버는 「없음」과 「여럿」을 **같은 답**(`found:false`)으로 준다 — 구분해 주면
+      그 자체가 명부를 떠보는 수단이 된다. 그래서 안내문도 하나다. */
+async function find() {
+  const q = $('q').value.trim()
+  const p4 = $('p4').value.replace(/[^0-9]/g, '')
+  $('nameErr').innerHTML = ''
+  if (q.length < 2) { err('nameErr', '이름을 두 글자 이상 입력해 주세요.'); return }
+  if (p4.length !== 4) { err('nameErr', '전화 뒷 4자리를 입력해 주세요.'); return }
+  $('btnFind').disabled = true; $('btnFind').textContent = '찾는 중…'
+  try {
+    const r = await fetch(API('/api-v1/kiosk/lookup'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: q, phoneLast4: p4 }),
+    })
+    const t = await r.text()
+    let j = null; try { j = JSON.parse(t) } catch {}
+    /* 🔴 시도 제한(429)은 **따로 안내한다** — 「못 찾았다」로 뭉뚱그리면
+       환자가 계속 다시 눌러 제한이 풀리지 않는다. */
+    if (r.status === 429) {
+      err('nameErr', (j && j.error) || '잠시 후 다시 시도해 주세요.')
+      return
+    }
+    if (!j) throw new Error('서버가 JSON 이 아닌 응답을 보냈어요 (' + r.status + ')')
+    if (!j.ok) throw new Error(j.error || '찾지 못했어요')
+    const d = j.data || {}
+    if (!d.found) {
+      // ⚠️ 「없음」을 오류로 그리지 않는다 — 처음 오신 분일 수 있다.
+      err('nameErr', '찾지 못했어요. 처음 방문이시면 「처음으로」 → 「처음 방문」을, '
+        + '그래도 안 되면 데스크에 문의해 주세요.')
+      return
+    }
+    /* 🔴 차트번호를 받지 않는다 — 본인 확인에는 이름이면 충분하고,
+       화면에 띄우면 어깨너머로 보인다. */
+    PICK = { patientId: d.patientId, name: d.name, chartNumber: '' }
+    askConfirm()
+  } catch (e) {
+    err('nameErr', String(e.message || e))
+  } finally {
+    $('btnFind').disabled = false; $('btnFind').textContent = '찾기'
+  }
+}
+$('btnFind').addEventListener('click', find)
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('p4').focus() })
+$('p4').addEventListener('keydown', e => { if (e.key === 'Enter') find() })
+
+/* ── 본인 확인 ──────────────────────────────────────────────────── */
+function askConfirm() {
+  if (!PICK) return
+  $('okName').textContent = PICK.name || '이름 없음'
+  $('okMeta').textContent = PICK.chartNumber ? '차트번호 ' + PICK.chartNumber : ''
+  $('okErr').innerHTML = ''
+  show('ok')
+}
+/* 🔴 「아니에요」는 **얼굴 결과를 버리고** 이름 입력으로 보낸다.
+   같은 얼굴로 다시 찍게 하면 같은 사람이 또 나온다. */
+$('btnNo').addEventListener('click', () => { PICK = null; show('name'); $('q').focus() })
+$('btnYes').addEventListener('click', submit)
+
+/* ── 접수 ───────────────────────────────────────────────────────── */
+/* 🔴 **덴트웹에 직접 쓴다**(2026-10-07 사용자 지시). 세 갈래(얼굴·초진·재진)가
+   모두 아래 `checkin()` 한 곳을 지나 `POST /api-v1/kiosk/checkin` 으로 간다
+   (바로 아래 fetch 가 실제 길이다 — 예전 주석의 `/api/kiosk/checkin` 이 아니다.
+   서버엔 둘 다 살아 있지만 이 화면이 부르는 것은 `/api-v1/` 쪽이다).
+   환자가 누르면 덴트웹 접수 목록에 바로 뜬다. 쓰기는 `winsa_writer` 로만 나간다.
+
+   🔴 **실패하면 「접수됐다」를 띄우지 않는다.** 환자가 완료 화면을 보고 기다리는데
+      덴트웹에는 아무것도 없는 상태가 제일 위험하다 — 아무도 그 환자를 부르지 않고,
+      환자는 접수된 줄 안다. 그 자리에서 멈추고 직원을 부르게 한다. */
+async function checkin(body) {
+  const r = await fetch(API('/api-v1/kiosk/checkin'), {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const t = await r.text()
+  let j = null; try { j = JSON.parse(t) } catch {}
+  if (!j) throw new Error('서버가 JSON 이 아닌 응답을 보냈어요 (' + r.status + ')')
+  if (!j.ok) throw new Error(j.error || '접수하지 못했어요')
+  return j.data || {}
+}
+function finish(name, d) {
+  $('doneName').textContent = (name || '') + '님, 접수되었습니다'
+  $('doneWait').hidden = false
+  // ⚠️ 이미 접수돼 있었으면 **그렇게 말한다.** 두 번 눌렀는데 아무 말이 없으면
+  //    환자는 두 번 접수된 줄 안다.
+  $('doneWait').textContent = (d && d.alreadyReceived)
+    ? '이미 접수되어 있어요 — 잠시만 기다려 주세요'
+    : (d && d.chartNumber ? '차트번호 ' + d.chartNumber + ' · 곧 불러 드릴게요'
+                          : '데스크에서 확인 후 불러 드릴게요')
+  show('done')
+  // 🔴 **10초 뒤 첫 화면**(사용자 지시 2026-10-15) — 세 갈래 모두 여기를 지난다.
+  idle(DONE_MS)
+  startCount(DONE_MS)
+  // 🔴 **키오스크에서 문진을 띄우지 않는다**(사용자 결정 2026-10-15) — 필요한 문진은
+  //    알림톡·데스크가 안내한다(위 #doneIntake 문구). 문진 새 창 코드(openIntake 이하)는
+  //    다시 켤 때를 위해 남겨 두되 **부르지 않는다**. 켜려면 INTAKE_IN_KIOSK 만 true 로.
+  if (INTAKE_IN_KIOSK && d && d.patientId) void openIntake(d.patientId)
+}
+
+/* 완료 화면 카운트다운 — 「N초 후 처음 화면으로 돌아가요」. 시간은 idle(DONE_MS) 이 쥔다. */
+const DONE_MS = 10000
+const INTAKE_IN_KIOSK = false
+let countT = null
+function startCount(ms) {
+  clearInterval(countT)
+  let left = Math.round(ms / 1000)
+  const paint = () => { $('doneCount').textContent = left + '초 후 처음 화면으로 돌아가요' }
+  paint()
+  countT = setInterval(() => { left -= 1; if (left <= 0) { clearInterval(countT); return } paint() }, 1000)
+}
+function stopCount() { clearInterval(countT); countT = null; $('doneCount').textContent = '' }
+
+async function submit() {
+  if (!PICK) { show('pick'); return }
+  const who = PICK.name || ''
+  const pid = PICK.patientId
+  $('btnYes').disabled = true; $('btnYes').textContent = '접수 중…'
+  $('okErr').innerHTML = ''
+  try {
+    const d = await checkin({ patientId: pid, via: PICK.via || 'search', probeId: PICK.probeId || null })
+    PICK = null              // 🔴 완료 화면에 넘기기 전에 지운다
+    finish(who, d)
+  } catch (e) {
+    err('okErr', String(e.message || e) + ' — 데스크 직원을 불러 주세요.')
+  } finally {
+    $('btnYes').disabled = false; $('btnYes').textContent = '네, 접수할게요'
+  }
+}
+
+/* 처음 방문 — 이름·전화로 **환자를 만들고** 접수한다.
+   ⚠️ 서버가 같은 이름+전화를 찾으면 **새로 만들지 않고 그 환자로 접수**한다
+      (재방문인데 「처음 방문」을 누르는 환자가 실제로 있다). */
+$('btnNew').addEventListener('click', async () => {
+  const n = $('nName').value.trim(), p = $('nPhone').value.replace(/\D/g, '')
+  $('newErr').innerHTML = ''
+  if (n.length < 2) { err('newErr', '성함을 입력해 주세요.'); return }
+  if (p.length < 9) { err('newErr', '전화번호를 정확히 입력해 주세요.'); return }
+  $('btnNew').disabled = true; $('btnNew').textContent = '접수 중…'
+  try {
+    const d = await checkin({ name: n, phone: p, via: 'new' })
+    finish(n, d)
+  } catch (e) {
+    err('newErr', String(e.message || e) + ' — 데스크 직원을 불러 주세요.')
+  } finally {
+    $('btnNew').disabled = false; $('btnNew').textContent = '접수하기'
+  }
+})
+
+/* ── 문진 ───────────────────────────────────────────────────────── */
+/* 🔴 **접수가 끝난 뒤에** 연다. 문진을 앞에 두면 인터넷이 끊겼을 때 접수 자체가
+   막힌다 — 환자는 눈앞에 서 있다. 문진은 **선택**이고, 실패해도 접수는 유효하다.
+
+   🔴 **조각 판정은 서버가 한다**(`/api-v1/kiosk/intake-token` → `plan()` ·
+      이 화면이 부르는 길은 아래 fetch 대로 `/api-v1/` 쪽이다).
+      화면이 「뭘 물을지」를 정하면 PC 시계마다 갈리고, URL 을 만져 안전 문항
+      (응급·병력)을 건너뛸 수 있다. */
+let intakeOn = false
+let INTAKE_URL = ''        // 발급된 문진 링크 — 🔴 버튼을 누를 때까지만 들고 있는다
+let intakeWin = null       // 새 창 — 🔴 키오스크가 **직접 닫는다**(앞사람 문진이 남지 않게)
+let intakeWatch = null     // 새 창이 닫혔는지 보는 타이머
+let intakeCap = null       // 상한 — 토큰 TTL(10분)과 같다
+let rmT = null             // 모니터 사본 새로고침
+/* 🔴 상한 = 토큰 수명(서버 `INTAKE_TTL_MINUTES` 10분). 그 뒤엔 링크가 죽으므로 창을 남길 이유가 없다.
+   ⚠️ 새 창에서는 토큰페이지의 완료 신호가 오지 않는다 — 그 페이지는 `window.parent` 로만
+      보낸다(kioskBridge.ts). 그래서 **창이 닫혔는지**와 **상한**으로 끝을 안다. */
+const INTAKE_MAX_MS = 10 * 60 * 1000
+
+/* 접수 직후 — 문진 링크를 **미리** 받아 두고 「문진 작성하기」 버튼을 띄운다.
+   🔴 새 창을 여기서 열지 않는다 — 접수 응답을 기다린 뒤라 브라우저가 **팝업으로 막는다.**
+      환자가 버튼을 누르는 그 순간에 연다(사용자 동작 안에서만 팝업이 허용된다). */
+async function openIntake(patientId) {
+  if (!patientId) return
+  INTAKE_URL = ''
+  $('btnIntake').hidden = true
+  try {
+    const r = await fetch(API('/api-v1/kiosk/intake-token'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ patientId: patientId }),
+    })
+    const tx = await r.text()
+    let j = null; try { j = JSON.parse(tx) } catch {}
+    if (!j) throw new Error('서버가 JSON 이 아닌 응답을 보냈어요 (' + r.status + ')')
+    if (!j.ok) throw new Error(j.error || '문진을 열지 못했어요')
+    const d = j.data || {}
+    // ⚠️ 물을 게 없으면 버튼을 띄우지 않는다. 빈 문진은 「뭘 하라는 거지」가 된다.
+    if (!d.needed || !d.url) { finishNoIntake(); return }
+    INTAKE_URL = d.url
+    $('btnIntake').hidden = false
+    // 버튼을 읽고 누를 시간을 준다(완료 화면 기본 8초는 짧다).
+    idle(30000)
+  } catch (e) {
+    // 🔴 **접수 실패로 보이지 않게 한다.** 접수는 이미 덴트웹에 들어갔다.
+    $('doneWait').textContent = '접수는 끝났어요 — 문진은 데스크에서 도와드릴게요'
+    console.log('[kiosk] 문진 열기 실패', String(e.message || e))
+    idle(8000)
+  }
+}
+
+$('btnIntake').addEventListener('click', function () {
+  if (!INTAKE_URL) return
+  // 화면 가운데에 세로로 긴 창 — 토큰페이지는 휴대폰 화면 기준이다. 양옆으로 본창(모니터)이 보인다.
+  const W = Math.min(640, screen.availWidth), H = screen.availHeight
+  const L = Math.max(0, Math.round((screen.availWidth - W) / 2))
+  intakeWin = window.open(INTAKE_URL, 'kioskIntake',
+    'popup,width=' + W + ',height=' + H + ',left=' + L + ',top=0')
+  INTAKE_URL = ''                       // 🔴 한 번 쓰면 버린다(다음 사람이 못 누르게)
+  $('btnIntake').hidden = true
+  if (!intakeWin) {
+    // 팝업이 막혔다 — 접수는 끝났으니 데스크로 안내한다.
+    $('doneWait').textContent = '접수는 끝났어요 — 문진은 데스크에서 도와드릴게요'
+    idle(8000)
+    return
+  }
+  intakeOn = true
+  clearTimeout(idleT)                   // 🔴 문진 중에는 복귀 타이머를 멈춘다
+  $('intake').hidden = false
+  $('intakeSay').textContent = '문진은 새 창에서 작성해 주세요'
+  loadMonitor()
+  rmT = setInterval(loadMonitor, 15000)
+  // 🔴 문진 창이 닫히면 **바로 첫 화면**으로 돌아간다(사용자 지시 2026-10-15 「문진을 마치면
+  //    초기 키오스크 화면으로」). 다음 환자가 곧바로 쓸 수 있게.
+  intakeWatch = setInterval(function () {
+    if (!intakeWin || intakeWin.closed) intakeFinished()
+  }, 1000)
+  intakeCap = setTimeout(intakeFinished, INTAKE_MAX_MS)
+})
+
+/* 문진 창·모니터·타이머를 **전부** 걷는다. reset·closeIntake·응급이 같이 쓴다. */
+function stopIntake() {
+  intakeOn = false
+  INTAKE_URL = ''
+  $('btnIntake').hidden = true
+  clearInterval(intakeWatch); intakeWatch = null
+  clearTimeout(intakeCap); intakeCap = null
+  clearInterval(rmT); rmT = null
+  // 🔴 **새 창을 닫는다** — 앞사람 문진이 다음 사람 앞에 남지 않게.
+  try { if (intakeWin && !intakeWin.closed) intakeWin.close() } catch {}
+  intakeWin = null
+  $('intake').hidden = true
+  $('rm').innerHTML = ''
+}
+
+/* 문진이 끝났다(완료 신호 · 창 닫힘 · 상한) → 창을 닫고 **첫 화면**으로. */
+function intakeFinished() {
+  stopIntake()
+  reset()
+}
+
+function closeIntake(msg) {
+  stopIntake()
+  if (msg) $('doneWait').textContent = msg
+  idle(msg ? 12000 : 8000)
+}
+function finishNoIntake() { idle(8000) }
+
+/* ── 문진 대기 모니터 사본 — `kiosk-monitor.js`(QR 제외 사본, 모니터 iframe 과 공용) ── */
+function loadMonitor() {
+  return window.KioskMonitor.load($('rm'), () => $('clinicName').textContent.trim(), () => intakeOn)
+}
+
+/* 🔴 **토큰페이지가 보내는 완료 신호를 받는다**(W1 계약).
+   `source` 로 거른다 — 다른 iframe·확장이 보내는 메시지가 섞일 수 있다.
+   ⚠️ 새 창으로 연 뒤로는 토큰페이지가 `window.opener`(= 이 문서)로 보내야 여기 닿는다
+      (kioskBridge.ts 가 `window.parent` 로만 보내면 안 온다 — 그때는 창 닫힘으로 안다). */
+window.addEventListener('message', function (e) {
+  const d = e.data
+  if (!d || d.source !== 'reach-token-page') return
+  if (d.type === 'intake_done') {
+    intakeFinished()
+  } else if (d.type === 'intake_emergency') {
+    // 🔴 **응급은 복귀가 아니다.** 조용히 첫 화면으로 돌려보내면 그 환자가
+    //    기다리는 동안 아무도 모른다 — 직원을 부르게 한다.
+    stopIntake()
+    // 🔴 **첫 화면 덮개를 반드시 걷는다.** 이게 빠져서 응급 안내가 「화면을 눌러
+    //    접수하세요」 **뒤에 가려졌다**(실측 2026-10-08). 가장 위험한 경우가
+    //    조용히 안 보이는 것이다 — 걸려 있던 복귀 타이머가 먼저 돌면 그렇게 된다.
+    clearTimeout(idleT)        // 🔴 먼저 끈다. 아래 show() 뒤에 끄면 그 사이 돌 수 있다.
+    $('home').style.display = 'none'
+    $('app').hidden = false
+    // 🔴 **완료 표시를 쓰지 않는다.** ✓ 와 「곧 불러 드릴게요」는 「잘 끝났으니
+    //    앉아 계세요」로 읽힌다 — 응급엔 정반대 신호다.
+    $('doneMark').textContent = '🚨'
+    $('doneName').textContent = '직원을 불러 주세요'
+    $('doneSub').textContent = '응급일 수 있어 데스크에 알렸습니다.'
+    $('doneWait').hidden = false
+    $('doneWait').textContent = '바로 도와드리겠습니다'
+    show('done')
+    clearTimeout(idleT)        // 🔴 show() 안의 idle() 이 다시 걸므로 **또** 끈다.
+                               //    자동 복귀하면 응급 환자를 조용히 돌려보내게 된다.
+  }
+})
+
+$('intakeClose').addEventListener('click', function () {
+  closeIntake('접수는 끝났어요 — 문진은 데스크에서 도와드릴게요')
+})
+
+</script>

@@ -1,0 +1,660 @@
+<!--
+  진료실 — operatory 모니터링 (2026-10-19)
+
+  사용자 지시: 「데스크 버튼 옆 진료실 버튼을 누르면 나오는 페이지와 기능을 모두 copy 하여
+  동일하게 동작하도록 api-v1 과 프론트엔드 개발」 — Monday 데스크(192.168.0.N2:8790/op) 참고.
+
+  🔴 **읽기 전용이다.** 덴트웹에 쓰지 않는다(라운지와 같은 규율).
+
+  구조(Monday /op 와 동일):
+    ① 상단 「대기·예약」 — 예약 타임라인(±90분) + 대기 환자 칩
+    ② 본문 — **층별 체어 그리드**(체어 카드: 번호·상태·진료 중 환자·진행바·계획대비·시간줄)
+    ③ 사이드바 — 출근 인력 · 가동률(담당의별) · 범례
+  데이터: GET /api-v1/op (op_route.rs) · 예약/대기 타임라인은 /api/dw/appointments·receptions 재사용.
+
+  🔴 색은 **우리 토큰**(파랑 계열)으로 옮긴다 — Monday 는 초록. 구조·정보는 맞추되 색은 우리 것.
+  🔴 계획대비 진료시간(plannedMin)·초과(over) 를 좌석에 표기한다(임상 리뷰 P1 — 가장 임상적 가치).
+-->
+<title>진료실 — 전체 모니터링</title>
+<style>
+:root{
+  --bg:#f2f4f6; --card:#fff; --soft:#f6f8fa; --line:#e5e9ee; --soft-line:#eef1f4;
+  --tx:#1a1f27; --dim:#5a6572; --dim2:#8a95a3; --muted:#aab3bf;
+  --blue:#3182f6; --blue-bg:#eaf2fe; --blue-line:#cfe0f7; --blue-d:#1b64da;
+  --green:#00875a; --green-bg:#e6f4ee; --green-line:#c3e6d5;
+  --amber:#c47d16; --amber-bg:#fdf3e2; --amber-line:#f0dcae;
+  --red:#e8384f; --red-bg:#fdecee; --red-line:#f6c9ce; --red-d:#c62b40;
+  --purple:#7c3aed; --purple-bg:#f1eafe;
+  --done-bg:#eef1f4;
+  --r-sm:8px; --r-md:12px; --r-lg:14px;
+  --sh-card:0 1px 2px rgba(20,30,45,.06);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);
+  font:14px/1.4 Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{padding:14px 16px 24px}
+
+/* ── 상단 바(제목 + KPI) ───────────────────────────────────────────── */
+.ohead{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.ohead h1{margin:0;font-size:18px;font-weight:800;letter-spacing:-.2px}
+.ohead .t{font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+.ohead .ro-tag{font-size:11px;font-weight:700;color:var(--dim);background:var(--done-bg);
+  border-radius:6px;padding:2px 8px}
+.ohead .kpis{margin-left:auto;display:flex;gap:16px;flex-wrap:wrap}
+.ohead .k{display:flex;align-items:baseline;gap:5px}
+.ohead .k b{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.ohead .k span{font-size:12px;color:var(--dim)}
+.ohead .k.warn b{color:var(--red)}
+.alertbar{background:var(--red-bg);border:1px solid var(--red-line);color:var(--red-d);
+  border-radius:var(--r-sm);padding:7px 12px;font-size:12.5px;font-weight:600;margin-bottom:10px}
+
+/* ── 상단 대기·예약 카드 ───────────────────────────────────────────── */
+.rcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--sh-card);padding:12px 14px;margin-bottom:12px}
+.rcard h2{margin:0 0 8px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+.rcard h2 .sub{font-weight:500;color:var(--dim2);font-size:12px}
+.rrow{display:grid;grid-template-columns:52px 1fr;gap:10px;align-items:start;margin-bottom:8px}
+.rlab{font-size:12px;font-weight:700;color:var(--dim)}
+.rlab b{display:block;font-size:17px;color:var(--tx)}
+/* 예약 타임라인 plot */
+.rplot{position:relative;height:66px;border-bottom:1px solid var(--soft-line)}
+.rtk{position:absolute;bottom:0;transform:translateX(-50%);font-size:10.5px;color:var(--dim2);
+  font-variant-numeric:tabular-nums}
+.rtk::before{content:"";position:absolute;top:-58px;left:50%;height:52px;border-left:1px dotted var(--soft-line)}
+.rnow{position:absolute;bottom:0;top:0;border-left:2px solid var(--red);z-index:2}
+.rnow span{position:absolute;top:-2px;left:3px;font-size:10px;font-weight:700;color:var(--red-d);white-space:nowrap}
+.rdot{position:absolute;width:16px;height:16px;border-radius:5px;transform:translate(-50%,-50%);
+  border:1px solid rgba(0,0,0,.08);cursor:pointer}
+.rdot.pre{background:var(--blue)}
+.rdot.late{background:var(--red)}
+.rdot.emg{background:var(--red);box-shadow:0 0 0 3px var(--red-bg)}
+/* 🔴 hover 하면 **선택된 것처럼** — 라운지 접수 네모(.rdot)와 같은 흰 링 + 그림자(사용자 지시 2026-10-20). */
+.rdot:hover,.rdot:focus-visible{outline:none;box-shadow:0 0 0 2px #fff,0 2px 8px rgba(0,0,0,.28);z-index:3}
+/* 대기 칩 */
+.wchips{display:flex;flex-wrap:wrap;gap:6px}
+.wchip{display:inline-flex;align-items:center;gap:6px;background:var(--soft);border:1px solid var(--line);
+  border-radius:999px;padding:4px 10px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--tx)}
+/* 🔴 hover 하면 **선택된 것처럼** 파란 배경 + 링(사용자 지시 2026-10-20). */
+.wchip:hover,.wchip:focus-visible{outline:none;background:var(--blue-bg);border-color:var(--blue);
+  box-shadow:0 0 0 1.5px var(--blue)}
+.wchip .dot{width:9px;height:9px;border-radius:50%;background:var(--dim2);flex:none}
+.wchip.emg{border-color:var(--red-line);background:var(--red-bg)}
+.wchip.emg .dot{background:var(--red)}
+.wchip em{font-style:normal;color:var(--dim2);font-weight:500;font-variant-numeric:tabular-nums}
+.wchip .tg{font-size:10.5px;font-weight:700;padding:0 5px;border-radius:999px;line-height:16px}
+.wchip .tg.walk{background:var(--amber-bg);color:var(--amber)}
+.wchip .tg.emg{background:var(--red);color:#fff}
+.rnone{color:var(--dim2);font-size:12.5px;padding:4px 0}
+
+/* ── 본문 2열(체어 그리드 + 사이드바) ──────────────────────────────── */
+.dgrid{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:12px;align-items:start}
+@media(max-width:900px){.dgrid{grid-template-columns:1fr}}
+
+/* 층 묶음 */
+.floor{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--sh-card);padding:10px 12px;margin-bottom:12px}
+.floor>.flab{font-size:13px;font-weight:700;color:var(--dim);margin:0 0 8px 2px}
+.chairs{display:grid;gap:10px;grid-template-columns:repeat(var(--cols,4),minmax(0,1fr))}
+@media(max-width:1200px){.chairs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.chairs{grid-template-columns:1fr}}
+
+/* 체어 카드 */
+/* ── ① 체어 안내 카드 ───────────────────────────────────────────── */
+.gcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:10px 12px;margin-bottom:12px}
+.ghead{font-size:13px;font-weight:800;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.ghead b{color:var(--blue)}
+.gsub{font-size:11px;font-weight:500;color:var(--dim2)}
+.glist{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px;margin-top:8px}
+.grow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--soft);
+  border:1px solid var(--line);border-radius:9px;padding:6px 9px;font:inherit;color:inherit;
+  cursor:pointer;text-align:left;width:100%}
+.grow:hover{border-color:var(--blue)}
+.gnm{font-size:12.5px;font-weight:700}
+.gnm em{font-style:normal;font-size:10.5px;color:var(--dim2);margin-left:3px}
+.gw{font-size:11px;color:var(--amber)}
+.gch{font-size:12px;font-weight:800;color:var(--blue);margin-left:auto}
+.gch.none{color:var(--dim2);font-weight:600}
+.gwhy{flex-basis:100%;font-size:10.5px;color:var(--dim2)}
+
+/* ── 체어 시간줄 (09~18시) — 참고 화면과 같은 모양 ─────────────────── */
+.otl{position:relative;height:26px;margin-top:2px;border-top:1px solid var(--line)}
+.otl u{position:absolute;top:1px;transform:translateX(-50%);font-size:9.5px;color:var(--dim2);
+  font-style:normal;line-height:1;pointer-events:none}
+/* 막대 — 완료(회색)/진행(파랑). 🔴 **글자 없음**(PII) */
+.otl .blk{position:absolute;bottom:2px;height:7px;border-radius:3px;font-style:normal}
+.otl .blk.done{background:#cfd6de}
+.otl .blk.now{background:var(--blue)}
+/* 🔴 **예측은 점선 테두리 + 속 비움** — 「아직 안 한 것」이 한눈에 구분돼야 한다.
+   참고 화면(Monday)도 예측 막대를 점선으로 둔다. */
+.otl .blk.predict{background:transparent;border:1px dashed var(--dim2);height:9px;bottom:1px;opacity:.75}
+/* 시간줄 범례 스와치 — 막대와 **같은 모양**이어야 설명이 된다 */
+.lgd .sw{display:inline-block;width:14px;height:7px;border-radius:3px;vertical-align:middle}
+.lgd .sw.done{background:#cfd6de}
+.lgd .sw.now{background:var(--blue)}
+.lgd .sw.predict{background:transparent;border:1px dashed var(--dim2);height:9px}
+/* 「다음」 줄 — 체어 카드 맨 아래 */
+.onext{margin-top:3px;font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.onext b{color:var(--ink);font-weight:700}
+.onext .oc{color:var(--dim2);font-size:10.5px}
+.opred{margin-left:2px;padding:0 4px;border:1px dashed var(--dim2);border-radius:7px;
+  font-size:9.5px;color:var(--dim2);line-height:14px}
+.chiprow.idle .c{background:var(--done-bg);color:var(--dim)}
+/* 「이후 예약」 — 시간줄 오른쪽 바깥에 붙는 요약 칸 */
+.laterbox{flex:0 0 auto;align-self:center;margin-left:10px;padding:6px 10px;border:1px solid var(--line);
+  border-radius:9px;background:var(--card2,#fafbfc);text-align:center;line-height:1.25;min-width:84px}
+.laterbox .ll{display:block;font-size:10px;color:var(--dim2)}
+.laterbox b{font-size:17px;font-weight:800;color:var(--ink)}
+.laterbox .lu{font-size:10.5px;color:var(--dim2);margin-left:1px}
+.laterbox .ln{display:block;font-size:10px;color:var(--dim2);margin-top:1px}
+/* 🔴 **지금 선은 빨강** — 한눈에 「어디까지 왔나」가 보여야 한다 */
+.otl .nowline{position:absolute;top:12px;bottom:0;width:2px;background:var(--red);font-style:normal}
+
+/* ── 진료 여정 + 확인·안내 ──────────────────────────────────────── */
+.care{display:flex;flex-direction:column;gap:3px;padding-top:4px;border-top:1px dashed var(--line)}
+.care.none{font-size:11px;color:var(--dim2);display:block}
+.care.none .cwhy{display:block;font-size:10px;opacity:.8}
+.jstep{font-size:11.5px;font-weight:700;color:var(--tx);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+/* 여정 띠 — 지난 회차(회색)·지금(파랑)·남은 회차(빈칸) */
+.jband{display:flex;align-items:center;gap:3px}
+.jband i{height:5px;flex:1 1 0;border-radius:3px;background:#e4e8ec}
+.jband i.done{background:#a9b4c0}
+.jband i.cur{background:var(--blue)}
+.jband .jn{font-size:10px;color:var(--dim2);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.ctags{display:flex;gap:4px;flex-wrap:wrap}
+.ct{font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px}
+.ct.cf{background:#fff4e5;color:#b45309}
+.ct.cg{background:#eaf3ff;color:#1d4ed8}
+.ct.cn{background:#eef1f5;color:#64748b}
+
+.ochair{background:var(--soft);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:10px;min-width:0;text-align:left;width:100%;font:inherit;color:inherit;cursor:pointer;
+  display:flex;flex-direction:column;gap:6px;transition:box-shadow .12s}
+/* 🔴 hover 하면 **선택된 것처럼** 파란 테두리 링 + 띄움(사용자 지시 2026-10-20) —
+   접수 네모 hover 와 같은 「선택됨」 느낌. 상태색(초과=빨강·상담=보라)이 있으면 그 색 링. */
+.ochair:hover,.ochair:focus-visible{outline:none;border-color:var(--blue);
+  box-shadow:0 0 0 2px var(--blue),0 4px 14px rgba(20,30,45,.14)}
+.ochair.over:hover,.ochair.over:focus-visible{border-color:var(--red);box-shadow:0 0 0 2px var(--red),0 4px 14px rgba(20,30,45,.14)}
+.ochair.consult:hover,.ochair.consult:focus-visible{border-color:var(--purple);box-shadow:0 0 0 2px var(--purple),0 4px 14px rgba(20,30,45,.14)}
+.ochair.free{background:var(--card);opacity:.72;cursor:default}
+/* 비어 있는 체어는 선택 대상이 아니다 — hover 링을 주지 않는다. */
+.ochair.free:hover{box-shadow:none;border-color:var(--line)}
+.ochair.over{border-color:var(--red-line)}
+.ochair.consult{border-color:var(--purple)}
+.cnm{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cbadge{display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:38px;
+  border-radius:50%;background:var(--tx);color:#fff;font-size:17px;font-weight:800;line-height:1;
+  font-variant-numeric:tabular-nums;flex:none;padding:0 6px}
+.ochair.free .cbadge{background:var(--muted)}
+.cname{font-size:12px;font-weight:700;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gb{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap;flex:none}
+.gb.run{background:var(--green-bg);color:var(--green)}
+.gb.over{background:var(--red-bg);color:var(--red-d)}
+.gb.consult{background:var(--purple-bg);color:var(--purple)}
+.gb.free{background:var(--done-bg);color:var(--muted)}
+/* 대기 줄 */
+.cwait{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;color:var(--dim)}
+.cwait .wl{font-weight:700}
+.cwait .wn{display:inline-flex;align-items:center;gap:3px;font-weight:700;color:var(--tx);cursor:pointer;
+  border-radius:6px;padding:0 4px;margin:0 -2px}
+/* 🔴 hover 하면 **선택된 것처럼** 파란 배경·링(사용자 지시 2026-10-20). */
+.cwait .wn:hover,.cwait .wn:focus-visible{outline:none;background:var(--blue-bg);box-shadow:0 0 0 1.5px var(--blue-line)}
+.cwait .wn em{font-style:normal;font-weight:500;color:var(--dim2);font-variant-numeric:tabular-nums}
+.cwait .wmore{font-weight:700;color:var(--dim2)}
+/* 지금 진료 박스 */
+.nowbox{border-radius:var(--r-sm);background:var(--blue-bg);box-shadow:inset 4px 0 0 var(--blue);padding:6px 8px}
+.ochair.over .nowbox{background:var(--red-bg);box-shadow:inset 4px 0 0 var(--red)}
+.ochair.consult .nowbox{background:var(--purple-bg);box-shadow:inset 4px 0 0 var(--purple)}
+.ptn{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptn .txn{font-size:12px;color:var(--dim);margin-left:5px;font-weight:600}
+.ptn .cno{font-size:11px;color:var(--dim2);font-weight:500;margin-left:4px}
+.sbl{font-size:11px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 진행 바 */
+.pgr{height:5px;background:var(--done-bg);border-radius:4px;margin:5px 0 3px;overflow:hidden}
+.pgr i{display:block;height:100%;background:var(--blue);border-radius:4px}
+.ochair.over .pgr i{background:var(--red)}
+.ochair.consult .pgr i{background:var(--purple)}
+.tmr{display:flex;justify-content:space-between;font-size:11px;font-variant-numeric:tabular-nums}
+.tmr .tl{color:var(--dim)}
+.tmr .ov{color:var(--red-d);font-weight:700}
+.nxt{font-size:11px;color:var(--dim2)}
+
+/* 사이드바 */
+.acard{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--sh-card);padding:12px 14px;position:sticky;top:12px}
+.acard h3{margin:14px 0 6px;font-size:12px;font-weight:700;color:var(--dim)}
+.acard h3:first-of-type{margin-top:0}
+.attn{font-size:12px;color:var(--dim)}
+.attn b{color:var(--tx)}
+.chiprow{display:flex;flex-wrap:wrap;gap:5px}
+.chiprow .c{font-size:11.5px;background:var(--soft);border:1px solid var(--line);border-radius:999px;
+  padding:2px 9px;color:var(--dim)}
+.wk{display:grid;grid-template-columns:52px 1fr 40px;gap:6px;align-items:center;margin:5px 0;font-size:12px}
+.wk .nm{font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wk .bar{height:7px;background:var(--done-bg);border-radius:4px;overflow:hidden}
+.wk .bar i{display:block;height:100%;border-radius:4px;background:var(--blue)}
+.wk.high .bar i{background:var(--red)}
+.wk.mid .bar i{background:var(--amber)}
+.wk .pct{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.wk.high .pct{color:var(--red-d)}
+.wnote{font-size:10.5px;color:var(--dim2);margin:-2px 0 4px 58px}
+.lgd{display:flex;flex-wrap:wrap;gap:5px 10px;font-size:11px;color:var(--dim)}
+.lgd span{display:inline-flex;align-items:center;gap:5px}
+.lgd i{width:11px;height:11px;border-radius:3px;border:1px solid var(--soft-line);display:inline-block}
+.anote{font-size:10.5px;color:var(--dim2);line-height:1.5;margin:10px 0 0}
+.dfoot{font-size:11px;color:var(--dim2);text-align:center;margin:16px 0 0}
+
+/* 로딩/빈 상태 */
+.loading{padding:60px 20px;text-align:center;color:var(--dim2);font-size:14px}
+
+/* ── 환자 요약 팝업(간단) ─────────────────────────────────────────── */
+.ppop-back{position:fixed;inset:0;background:rgba(20,30,45,.28);z-index:60;display:flex;
+  align-items:center;justify-content:center;padding:20px}
+.ppop{background:var(--card);border-radius:var(--r-lg);box-shadow:0 20px 60px rgba(0,0,0,.3);
+  width:min(440px,94vw);max-height:84vh;overflow:auto;padding:0}
+.ppop .ph{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--card)}
+.ppop .ph .nm{font-size:16px;font-weight:800}
+.ppop .ph .cno{font-size:12px;color:var(--dim)}
+.ppop .ph .x{margin-left:auto;border:0;background:transparent;font-size:18px;cursor:pointer;color:var(--dim)}
+.ppop .pb{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.ppop .sec h4{margin:0 0 4px;font-size:12px;font-weight:700;color:var(--dim)}
+.ppop .li{font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--soft-line);display:flex;
+  justify-content:space-between;gap:10px}
+.ppop .li:last-child{border-bottom:0}
+.ppop .muted{color:var(--dim2);font-size:12px}
+.ppop .note{background:var(--amber-bg);border-radius:var(--r-sm);padding:8px 10px;font-size:12px;color:var(--amber)}
+</style>
+
+<div class="wrap" id="app"><div class="loading">진료실 불러오는 중…</div></div>
+
+<script>
+/* 🔴 토큰 주입 — 라운지와 **같은** fetch 래퍼(설명은 desk-lounge.html 참고). */
+(function(){
+  var token=''; try{ token=localStorage.getItem('mw_token')||'' }catch(e){}
+  var orig=window.fetch;
+  function isApi(u){ try{ var x=new URL(u,location.href); return x.origin===location.origin && /^\/(api|api-v1)\//.test(x.pathname) }catch(e){ return false } }
+  var redir=false;
+  window.fetch=function(input,init){
+    var u=typeof input==='string'?input:(input&&input.url)||'';
+    if(token && isApi(u)){
+      init=init||{};
+      var h=new Headers(init.headers||(typeof input!=='string'&&input.headers)||{});
+      if(!h.has('authorization')) h.set('authorization','Bearer '+token);
+      init.headers=h; if(!init.credentials) init.credentials='same-origin';
+    }
+    return orig.call(this,input,init).then(function(r){
+      if(r && r.status===401 && isApi(u) && !/\/api\/auth\//.test(u) && !redir){
+        redir=true;
+        var from=location.pathname+location.search+location.hash;
+        (window.top||window).location.replace('/login?from='+encodeURIComponent(from));
+      }
+      return r;
+    });
+  };
+})();
+
+const $ = id => document.getElementById(id);
+const api = p => location.origin + p;
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad2 = n => String(n).padStart(2,'0');
+const POLL_MS = 10000;
+
+let OP = null;          // /api-v1/op 응답
+let APPTS = [];         // 오늘 예약(타임라인용) — /api/dw/appointments
+let connOk = true, lastErr = '';
+let pinned = false;     // 팝업 열림 — 열려 있어도 보드는 계속 갱신(리뷰 P1)
+
+/* HHmm → "HH:MM" */
+function hm4(s){ const t=String(s||'').replace(/\D/g,''); return t.length>=4 ? t.slice(-4,-2)+':'+t.slice(-2) : ''; }
+/* 분 → "N분" / "N시간 N분" */
+function durMin(m){ if(m==null) return ''; m=Math.round(m); if(m<60) return m+'분'; const h=Math.floor(m/60), r=m%60; return r? h+'시간 '+r+'분' : h+'시간'; }
+function apptMin(scheduledAt){ const t=String(scheduledAt||'').replace(/\D/g,''); if(t.length<12) return null; return (+t.slice(8,10))*60 + (+t.slice(10,12)); }
+function nowMin(){ const d=new Date(); return d.getHours()*60+d.getMinutes(); }
+function nowHm(){ const d=new Date(); return pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+
+async function load(){
+  const [op, appts] = await Promise.all([
+    fetch(api('/api-v1/op'), {headers:{accept:'application/json'}}).then(r=>r.json()).catch(()=>null),
+    fetch(api('/api/dw/appointments'), {headers:{accept:'application/json'}}).then(r=>r.json()).catch(()=>null),
+  ]);
+  if(!op || !op.ok){
+    connOk=false; lastErr=(op&&(op.error||op.message))||'덴트웹 조회 실패';
+    render(); return;
+  }
+  connOk=true; OP=op.data;
+  // 예약 목록 — 원본 모양(arrOf: 최상위 배열 또는 data)
+  APPTS = Array.isArray(appts) ? appts
+        : (appts && Array.isArray(appts.items)) ? appts.items
+        : (appts && Array.isArray(appts.data)) ? appts.data : [];
+  render();
+}
+
+/* ── 상단 대기·예약 ─────────────────────────────────────────────── */
+function rainHTML(){
+  const WIN=90;                 // 앞으로 90분
+  const now=nowMin(), lo=now, hi=now+WIN;
+  // 예약(미이행=0) 중 창 안
+  const dots = APPTS.filter(a=>{ const m=apptMin(a.scheduledAt); return m!=null && Number(a.status)===0 && m>=lo-15 && m<=hi; });
+  let plot='';
+  // 눈금 0/30/60/90
+  for(let off=0; off<=WIN; off+=30){ const x=4+(off/WIN)*92; plot+='<span class="rtk" style="left:'+x+'%">'+(off===0?nowHm():(pad2(Math.floor((now+off)/60)%24)+':'+pad2((now+off)%60)))+'</span>'; }
+  plot+='<span class="rnow" style="left:4%"><span>지금</span></span>';
+  for(const a of dots){
+    const m=apptMin(a.scheduledAt); const off=Math.max(0,Math.min(WIN,m-now));
+    const x=4+(off/WIN)*92; const y=28+((a.patientId||0)%3)*12;
+    const late=m<now; const nm=esc(a.name||'')+(a.chartNumber?' #'+esc(a.chartNumber):'');
+    plot+='<button class="rdot '+(late?'late':'pre')+'" style="left:'+x+'%;top:'+y+'px" data-pid="'+esc(a.patientId)+'" title="'+nm+' · '+hm4(a.scheduledAt)+'"></button>';
+  }
+  // 대기 환자 칩 — op.stats.waiting 는 수만. 대기 환자 목록은 체어별 waiting 을 모은다.
+  const waits=[];
+  (OP.floors||[]).forEach(f=>(f.chairs||[]).forEach(c=>(c.waiting||[]).forEach(w=>waits.push(w))));
+  let chips = waits.length
+    ? '<div class="wchips">'+waits.map(w=>'<button class="wchip" data-pid="'+esc(w.patientId)+'"><span class="dot"></span>'
+        +esc(w.name||'이름 없음')+(w.chartNumber?'<em>#'+esc(w.chartNumber)+'</em>':'')+'</button>').join('')+'</div>'
+    : '<div class="rnone">체어 옆 대기 예측 없음 — 접수 대기는 데스크(라운지) 참고</div>';
+  /* 🔴 **「이후 예약」** — 90분 창 **밖**의 오늘 남은 예약(사용자 지시 2026-10-21).
+     이게 없으면 창 안이 0명일 때 **오늘이 끝난 것처럼** 보인다 —
+     참고 화면의 「이후 예약 62명 · 다음 14:00」 칸이다. */
+  const later=OP.later||{};
+  const laterBox = (later.count!=null)
+    ? '<div class="laterbox"><span class="ll">이후 예약</span><b>'+later.count+'</b><span class="lu">명</span>'
+      + (later.nextHm?'<span class="ln">다음 '+esc(later.nextHm)+'</span>':'') + '</div>'
+    : '';
+  return '<div class="rcard">'
+    + '<h2>대기·예약 <span class="sub">예약은 앞으로 90분 · 대기는 체어 배정 예측</span></h2>'
+    + '<div class="rrow"><div class="rlab">예약<b>'+dots.length+'</b></div><div class="rplot">'+plot+'</div>'
+    +   laterBox + '</div>'
+    + '<div class="rrow"><div class="rlab">대기<b>'+waits.length+'</b></div>'+chips+'</div>'
+    + '</div>';
+}
+
+/* ── 체어 카드 ──────────────────────────────────────────────────── */
+function chairHTML(c){
+  const st=c.state||'free';
+  const badgeCls = st==='over'?'gb over': st==='consult'?'gb consult': st==='free'?'gb free':'gb run';
+  let inner = '<div class="cnm"><span class="cbadge">'+esc(c.name||c.chairId)+'</span>'
+    + '<span class="'+badgeCls+'">'+esc(c.stateLabel||'')+'</span></div>';
+  // 대기 줄
+  const waits=c.waiting||[];
+  if(waits.length){
+    inner += '<div class="cwait"><span class="wl">대기:</span>'
+      + waits.slice(0,2).map(w=>'<button class="wn" data-pid="'+esc(w.patientId)+'">'+esc(w.name||'이름 없음')
+          +(w.chartNumber?'<em>#'+esc(w.chartNumber)+'</em>':'')+'</button>').join('')
+      + (waits.length>2?'<span class="wmore">+'+(waits.length-2)+'</span>':'')
+      + '</div>';
+  }
+  if(st==='free'){
+    inner += tlHTML(c.timeline);
+    /* 🔴 비어 있어도 **다음에 올 사람**을 보여준다 — 참고 화면과 같은 자리.
+       없을 때만 「대기·예약 없음」. 예전엔 늘 「없음」이라 **오후가 빈 것처럼** 보였다. */
+    inner += (c.next && c.next.name) ? nextHTML(c.next) : '<div class="nxt">대기·예약 없음</div>';
+    return '<button class="ochair free" tabindex="-1">'+inner+'</button>';
+  }
+  // 진료 중 박스
+  const planned=c.plannedMin, elapsed=c.elapsedMin;
+  const timeLine = planned!=null
+    ? esc(durMin(elapsed))+' / '+esc(durMin(planned))+' 예약'
+    : esc(durMin(elapsed))+' 진료';
+  inner += '<div class="nowbox">'
+    + '<div class="ptn">'+esc(c.patientName||'이름 없음')
+      + (c.chartNumber?'<span class="cno">#'+esc(c.chartNumber)+'</span>':'')
+      + (c.tx?'<span class="txn">'+esc(String(c.tx).slice(0,24))+'</span>':'')+'</div>'
+    + '<div class="sbl">'+[c.startHm?('시작 '+esc(c.startHm)):'', c.doctor?('담당의 '+esc(c.doctor)):'', timeLine].filter(Boolean).join(' · ')+'</div>'
+    + (planned!=null?'<div class="pgr"><i style="width:'+(c.progressPct||0)+'%"></i></div>':'')
+    + '<div class="tmr">'
+      + '<span class="tl">'+(c.remainMin!=null && c.remainMin>=0 ? ('남은 예약 '+esc(durMin(c.remainMin))) : '')+'</span>'
+      + (c.over?'<span class="ov">+'+esc(durMin(Math.max(0,elapsed-(planned||elapsed))))+' 초과</span>':'')
+    + '</div>'
+    + '</div>';
+  inner += tlHTML(c.timeline);
+  inner += careHTML(c.care);
+  inner += nextHTML(c.next);
+  return '<button class="ochair '+(st==='over'?'over':st==='consult'?'consult':'busy')+'" data-pid="'+esc(c.patientId)+'">'+inner+'</button>';
+}
+
+/* ── ① 「몇 번 체어로 안내하나」 (사용자 지시 2026-10-20) ───────────────
+ * 체어가 **안 정해진** 대기 환자 + 서버의 추천 체어·근거.
+ * 🔴 **추천이라고 적는다.** 덴트웹 예약에 체어 칸이 없어 배정이 아니라 추정이다 —
+ *    근거(why)를 같이 보여 직원이 뒤집을 수 있게 한다.
+ * ⚠️ 빈 체어가 없으면 번호를 **지어내지 않고** 「빈 체어 없음」이라 적는다.
+ */
+function guideHTML(){
+  const g=OP.guide||[];
+  if(!g.length) return '';
+  return '<div class="gcard"><div class="ghead">체어 안내 <b>'+g.length+'</b>명'
+    + '<span class="gsub">체어가 아직 안 정해진 대기 — <b>추천</b>입니다(배정 아님)</span></div>'
+    + '<div class="glist">'
+    + g.map(x=>'<button class="grow" data-pid="'+esc(x.patientId)+'">'
+        + '<span class="gnm">'+esc(x.name||'이름 없음')
+          + (x.chartNumber?'<em>#'+esc(x.chartNumber)+'</em>':'')+'</span>'
+        + (x.waitedMin!=null?'<span class="gw">'+esc(durMin(x.waitedMin))+' 대기</span>':'')
+        + (x.suggestChairName
+            ? '<span class="gch">→ '+esc(x.suggestChairName)+'</span>'
+            : '<span class="gch none">빈 체어 없음</span>')
+        + '<span class="gwhy">'+esc(x.why||'')+'</span>'
+      + '</button>').join('')
+    + '</div></div>';
+}
+
+/* ── 진료 여정 + 확인·안내 (사용자 지시 2026-10-20) ──────────────────
+ * 거시 = **여정 띠**(①②③ 중 지금 어디) · 미시 = **확인받을 것/안내할 것** 수.
+ * 🔴 판정 못 했으면 **그렇게 적는다** — 숨기면 직원이 엉뚱한 준비를 한다.
+ *    (규칙은 `cr prep`·`t/s` 같은 **진료 약어**로 걸린다. 한글 문장은 자주 안 걸린다
+ *     — 실측으로 확인했다. 그래서 「판정 못 함」이 흔하고, 그게 사실이다.)
+ * ⚠️ 카드에는 **수만** 보여주고 문장은 팝업에서 — 카드가 길어지면 체어가 안 보인다.
+ */
+function careHTML(care){
+  if(!care) return '';
+  if(!care.judged){
+    return '<div class="care none" title="'+esc(care.reason||'')+'">진료 판정 못 함'
+      + (care.reason?'<span class="cwhy">'+esc(care.reason)+'</span>':'')+'</div>';
+  }
+  const j=care.journey||{};
+  const total=j.stepTotal||0, idx=(j.stepIndex!=null?j.stepIndex:0);
+  // 여정 띠 — 회차가 2개 이상일 때만 그린다(1칸짜리 띠는 뜻이 없다)
+  let band='';
+  if(total>1){
+    let dots='';
+    for(let i=0;i<total;i++) dots += '<i class="'+(i<idx?'done':i===idx?'cur':'todo')+'"></i>';
+    band = '<div class="jband" title="'+esc(j.steps?j.steps.join(' → '):'')+'">'+dots
+      + '<span class="jn">'+(idx+1)+'/'+total+'</span></div>';
+  }
+  const nConfirm=(care.confirm||[]).length;
+  const nGuide=(care.guide||[]).reduce((a,g)=>a+((g.items||[]).length),0);
+  return '<div class="care">'
+    + '<div class="jstep">'+esc(care.treatment||'')+(j.step?' · '+esc(j.step):'')+'</div>'
+    + band
+    + '<div class="ctags">'
+      + (nConfirm?'<span class="ct cf">확인 '+nConfirm+'</span>':'')
+      + (nGuide?'<span class="ct cg">안내 '+nGuide+'</span>':'')
+      + ((care.next||[]).length?'<span class="ct cn">다음 있음</span>':'')
+    + '</div></div>';
+}
+
+/* ── 체어 시간줄 (09~18시) ─────────────────────────────────────────
+ * 🔴 **퍼센트는 서버가 준다** — 화면은 그리기만(CLAUDE.md §3-2d).
+ *    `timeline = {workStart, workEnd, nowPct, blocks:[{kind,leftPct,widthPct}]}`
+ * ⚠️ 막대에 **글자를 넣지 않는다.** 진료 메모는 환자 자유기술(PII)이고 이 화면은
+ *    진료실 벽에 걸린다 — 대기 환자가 남의 진료 내용을 읽게 된다.
+ *    (참고 화면은 label 을 넣지만 거기까지 따라가지 않는다.)
+ */
+function tlHTML(tl){
+  if(!tl) return '';
+  const a=parseInt((tl.workStart||'09:00').slice(0,2),10);
+  const b=parseInt((tl.workEnd||'18:00').slice(0,2),10);
+  const span=Math.max(1,b-a);
+  let ticks='';
+  for(let h=a; h<=b; h++){
+    ticks += '<u style="left:'+(((h-a)/span)*100).toFixed(1)+'%">'+h+'</u>';
+  }
+  /* 🔴 종류는 셋 — 완료(회색) · 진행(파랑) · **예측(점선)**.
+     예측을 완료와 같게 그리면 「이미 한 진료」로 오독된다. */
+  const kindOf = k => k==='now' ? 'now' : (k==='predict' ? 'predict' : 'done');
+  const blocks=(tl.blocks||[]).map(x=>
+    '<i class="blk '+kindOf(x.kind)+'" style="left:'+x.leftPct+'%;width:'+x.widthPct+'%"></i>').join('');
+  const now=(tl.nowPct!=null)?'<em class="nowline" style="left:'+tl.nowPct+'%"></em>':'';
+  return '<div class="otl" aria-hidden="true">'+ticks+blocks+now+'</div>';
+}
+
+/** 🔴 체어의 **「다음」 줄** — 참고 화면에 있는데 우리에겐 없던 것(사용자 지시 2026-10-21).
+ *  ⚠️ 예약에는 체어 칸이 없어 **예측**이다 — 배지를 반드시 붙인다(단정하지 않는다). */
+function nextHTML(n){
+  if(!n || !n.name) return '';
+  return '<div class="onext" data-pid="'+esc(n.patientId)+'">다음: <b>'+esc(n.name)+'</b>'
+    + (n.chartNumber ? ' <span class="oc">#'+esc(n.chartNumber)+'</span>' : '')
+    + ' ' + esc(n.hm||'')
+    + (n.estimated ? '<span class="opred">예측</span>' : '')
+    + '</div>';
+}
+
+function floorsHTML(){
+  return (OP.floors||[]).map(f=>'<div class="floor"><div class="flab">'+esc(f.label||'진료실')+'</div>'
+    + '<div class="chairs" style="--cols:'+(f.columns||4)+'">'
+    + (f.chairs||[]).map(chairHTML).join('')
+    + '</div></div>').join('');
+}
+
+/* ── 사이드바 ───────────────────────────────────────────────────── */
+function sideHTML(){
+  const at=OP.attendance||{}; const present=at.present||[];
+  const wk=OP.workload||[];
+  const ut=OP.utilization||{};
+  let h='<div class="acard">';
+  h+='<div class="attn">출근 <b>'+present.length+'명</b>'+(at.estimated?' <span class="muted" title="덴트웹에 출근부가 없어 오늘 진료를 본 직원으로 추정합니다">(추정)</span>':'')+'</div>';
+  if(present.length){ h+='<h3>출근 인력</h3><div class="chiprow">'+present.map(n=>'<span class="c">'+esc(n)+'</span>').join('')+'</div>'; }
+  /* 🔴 **쉬는 인력** — 참고 화면에 있는데 우리에겐 없던 칸(사용자 지시 2026-10-21).
+     「놀고 있다」가 아니라 **지금 환자를 더 받을 수 있는 사람**을 보는 칸이다. */
+  const idle=at.idle||[];
+  if(idle.length){ h+='<h3>쉬는 인력 <span class="muted" style="font-weight:500">지금 진료 중이 아님</span></h3>'
+    + '<div class="chiprow idle">'+idle.map(n=>'<span class="c">'+esc(n)+'</span>').join('')+'</div>'; }
+  h+='<h3>가동률 <span class="muted" style="font-weight:500">'+esc(ut.workStart||'09:00')+'~'+esc(ut.workEnd||'18:00')+' 기준'+(ut.confirmed?'':' · 원장 확인 전')+'</span></h3>';
+  if(wk.length){
+    h+=wk.map(w=>'<div class="wk '+(w.band||'')+'"><span class="nm">'+esc(w.name)+'</span>'
+      + '<span class="bar"><i style="width:'+(w.barPct||0)+'%"></i></span>'
+      + '<span class="pct">'+(w.pct||0)+'<small>%</small></span></div>'
+      + (w.note?'<div class="wnote">'+esc(w.note)+'</div>':'')).join('');
+  } else { h+='<div class="muted">아직 진료 기록이 없어요</div>'; }
+  h+='<h3>상태 범례</h3><div class="lgd">'
+    + '<span><i style="background:var(--green-bg);border-color:var(--green-line)"></i>진료중</span>'
+    + '<span><i style="background:var(--red-bg);border-color:var(--red-line)"></i>예약 초과</span>'
+    + '<span><i style="background:var(--purple-bg);border-color:var(--purple)"></i>상담 중</span>'
+    + '<span><i style="background:var(--done-bg)"></i>비어 있음</span>'
+    + '<span><i style="background:var(--blue)"></i>예약</span>'
+    + '</div>';
+  /* 🔴 **시간줄 범례** — 막대 색을 설명하는 곳이 없었다(참고 화면엔 있다).
+     설명이 없으면 점선 예측을 「끝난 진료」로 읽는다. */
+  h+='<h3>시간줄 범례</h3><div class="lgd tlg">'
+    + '<span><i class="sw done"></i>완료</span>'
+    + '<span><i class="sw now"></i>진행</span>'
+    + '<span><i class="sw predict"></i>예측</span>'
+    + '</div>';
+  h+='<p class="anote">시간줄은 '+esc(ut.workStart||'09:00')+'~'+esc(ut.workEnd||'18:00')+' · <b>빨간 선 = 지금</b>. '
+    + '예약에는 체어 칸이 없어 「<b>다음</b>」과 「<b>대기</b>」는 <b>예측</b>입니다(담당이 오늘 쓴 체어 기준). '
+    + '가동률 = 담당 진료 시간 ÷ 근무 시간(시간 기반, '+esc(ut.workStart||'09:00')+'~'+esc(ut.workEnd||'18:00')+'). '
+    + '진료실은 <b>읽기 전용</b> — 상태 변경은 덴트웹에서 합니다.</p>';
+  h+='</div>';
+  return h;
+}
+
+/* ── 그리기 ─────────────────────────────────────────────────────── */
+function render(){
+  if(!OP && connOk){ return; }
+  if(!connOk){
+    $('app').innerHTML = '<div class="alertbar">🔴 덴트웹 끊김 — '+esc(lastErr)+'</div>'
+      + '<div class="loading">진료실 데이터를 불러오지 못했어요. 잠시 후 다시 시도합니다.</div>';
+    return;
+  }
+  const s=OP.stats||{};
+  let h='';
+  h+='<div class="ohead"><h1>진료실</h1>'
+    + '<span class="t">'+esc(OP.date? (OP.date.slice(0,4)+'-'+OP.date.slice(4,6)+'-'+OP.date.slice(6,8)):'')+' · '+esc(OP.time||nowHm())+'</span>'
+    + '<span class="ro-tag">읽기 전용 · 덴트웹에 쓰지 않음</span>'
+    + '<div class="kpis">'
+      + '<div class="k"><b>'+(s.appts||0)+'</b><span>예약·접수</span></div>'
+      + '<div class="k"><b>'+(s.busy||0)+'</b><span>진료 중</span></div>'
+      + '<div class="k '+(s.waiting?'warn':'')+'"><b>'+(s.waiting||0)+'</b><span>대기</span></div>'
+      /* 🔴 체어가 안 정해진 대기 — 예전엔 세고도 **화면에서 사라지던** 수다. */
+      + (s.unassigned?'<div class="k warn"><b>'+s.unassigned+'</b><span>체어 미정</span></div>':'')
+      + '<div class="k '+(s.emergency?'warn':'')+'"><b>'+(s.emergency||0)+'</b><span>응급</span></div>'
+    + '</div></div>';
+  if(!connOk) h+='<div class="alertbar">🔴 덴트웹 끊김 — '+esc(lastErr)+'</div>';
+  h+=rainHTML();
+  // ① 체어 안내 — 대기 줄 바로 아래(「지금 누구를 어디로」가 가장 급한 일)
+  h+=guideHTML();
+  h+='<div class="dgrid"><div>'+floorsHTML()+'</div>'+sideHTML()+'</div>';
+  h+='<p class="dfoot">진료실 · Monday 데스크 「진료실」 참고 · 읽기 전용 · 실발송 없음</p>';
+  $('app').innerHTML=h;
+  bindClicks();
+}
+
+function bindClicks(){
+  document.querySelectorAll('[data-pid]').forEach(el=>{
+    el.addEventListener('click', e=>{ e.stopPropagation(); e.preventDefault(); openPatient(el.dataset.pid); });
+  });
+}
+
+/* ── 환자 요약 팝업(간단) — 체어·대기·예약 환자를 누르면 ───────────────
+ *   🔴 데스크(라운지)의 **풀 상세패널**(치아차트·파노라마·메신저)과 달리, 진료실에서는
+ *      chair-side 가 바로 필요한 것(남은 진료·다음 예약·최근 진료·메모)만 간단히 보여준다.
+ *      풀 상세는 데스크에서 — 「데스크에서 자세히」 안내. */
+async function openPatient(pid){
+  if(!pid) return;
+  pinned=true;
+  const back=document.createElement('div');
+  back.className='ppop-back';
+  back.innerHTML='<div class="ppop"><div class="ph"><span class="nm">불러오는 중…</span><button class="x" aria-label="닫기">✕</button></div><div class="pb"><div class="muted">환자 정보를 불러오고 있어요…</div></div></div>';
+  document.body.appendChild(back);
+  const close=()=>{ if(back.parentNode) back.parentNode.removeChild(back); pinned=false; };
+  back.querySelector('.x').onclick=close;
+  back.addEventListener('click', e=>{ if(e.target===back) close(); });
+  document.addEventListener('keydown', function onEsc(e){ if(e.key==='Escape'){ close(); document.removeEventListener('keydown',onEsc); } });
+
+  let d=null;
+  try{ const j=await fetch(api('/api-v1/patient/'+encodeURIComponent(pid)+'/detail'),{headers:{accept:'application/json'}}).then(r=>r.json()); d=(j&&j.ok)?j.data:(j&&j.data?j.data:j); }catch(e){}
+  if(!back.parentNode) return;  // 이미 닫힘
+  const name=(d&&(d.name||d.patientName))||'환자';
+  const chart=(d&&(d.chartNumber||d.chart_number))||'';
+  const plansLeft=((d&&d.plans)||[]).filter(p=>p.status!==4);
+  const recentTx=(d&&d.recentTx)||[];
+  /* 🔴 **키 이름이 틀려 있었다**(2026-10-20 실측). `/api-v1/patient/:id/detail` 이 주는 키는
+     `nextVisit`·`memos` 인데 `nextAppointment`·`memo` 를 읽어, 「다음 예약」은 **항상
+     「예약 없음」**이었고 메모 줄은 **한 번도 안 떴다**. 추측한 이름을 나열해 두면
+     어느 것도 안 맞아도 **조용히 빈칸**이 된다 — 실제 키 하나만 읽는다. */
+  const nextAppt=d&&d.nextVisit;
+  const memo=(()=>{ const ms=(d&&d.memos)||[]; const m=ms[0];
+    return m?((m.preview||'')+(m.date?' · '+m.date:'')):''; })();
+  let body='';
+  // 남은 진료(계획)
+  body+='<div class="sec"><h4>남은 진료</h4>'
+    + (plansLeft.length ? plansLeft.slice(0,6).map(p=>'<div class="li"><span>'+esc(p.displayName||p.name||p.title||'계획')+'</span>'
+        + '<span class="muted">'+esc(p.statusLabel||'')+'</span></div>').join('')
+      : '<div class="muted">남은 계획 없음</div>')
+    + '</div>';
+  // 다음 예약
+  body+='<div class="sec"><h4>다음 예약</h4>'
+    + (nextAppt ? '<div class="li"><span>'+esc(typeof nextAppt==='string'?nextAppt:(nextAppt.label||nextAppt.at||''))+'</span></div>'
+      : '<div class="muted">예약 없음</div>')
+    + '</div>';
+  // 최근 진료
+  body+='<div class="sec"><h4>최근 진료</h4>'
+    + (recentTx.length ? recentTx.slice(0,5).map(t=>'<div class="li"><span>'+esc(t.name||t.label||'')+'</span>'
+        + '<span class="muted">'+esc(t.at||t.date||'')+'</span></div>').join('')
+      : '<div class="muted">기록 없음</div>')
+    + '</div>';
+  if(memo) body+='<div class="note">메모 · '+esc(String(memo).slice(0,120))+'</div>';
+  body+='<div class="muted">치아 차트·파노라마·메신저 등 전체 상세는 <b>데스크(라운지)</b>에서 볼 수 있어요.</div>';
+  back.querySelector('.ppop').innerHTML='<div class="ph"><span class="nm">'+esc(name)+'</span>'
+    + (chart?'<span class="cno">#'+esc(chart)+'</span>':'')+'<button class="x" aria-label="닫기">✕</button></div>'
+    + '<div class="pb">'+body+'</div>';
+  back.querySelector('.x').onclick=close;
+}
+
+/* ── 폴링 — 🔴 팝업이 열려 있어도 보드는 계속 갱신한다(리뷰 P1: 모니터링이 멈추면 안 된다).
+ *   render() 가 #app 만 다시 그리고, 팝업(.ppop-back)은 body 직속이라 영향받지 않는다. */
+async function tick(){ try{ await load(); }catch(e){ connOk=false; lastErr=(e&&e.message)||'오류'; render(); } }
+load();
+setInterval(tick, POLL_MS);
+</script>

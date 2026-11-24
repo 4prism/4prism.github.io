@@ -1,0 +1,293 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>모닝 — 전체 대시보드</title>
+<style>
+:root{
+  --ink:#111827;--sub:#4b5563;--muted:#9ca3af;--line:#e5e7eb;--soft:#f9fafb;
+  --blue:#2a85ff;--blue-soft:#eff6ff;--green:#047857;--green-soft:#ecfdf5;
+  --red:#b91c1c;--red-soft:#fef2f2;--amber:#b45309;--amber-soft:#fffbeb;
+  --teal:#0f766e;--teal-soft:#f0fdfa;
+  --font:"Apple SD Gothic Neo",Pretendard,-apple-system,"Noto Sans KR",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#f3f4f6;font:14px/1.5 var(--font);color:var(--ink);min-height:100vh}
+.wrap{padding:20px 24px;max-width:1200px}
+.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.5px}
+.page-sub{font-size:13px;color:var(--muted)}
+.btn-refresh{
+  border:1px solid var(--line);background:#fff;border-radius:9px;
+  padding:7px 14px;font:600 13px var(--font);cursor:pointer;color:var(--sub);
+}
+.btn-refresh:hover{background:var(--soft)}
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.kpi-num{font-size:28px;font-weight:800;line-height:1}
+.kpi-label{font-size:12px;color:var(--sub);margin-top:4px;font-weight:600}
+.kpi-num.blue{color:var(--blue)}
+.kpi-num.green{color:var(--green)}
+.kpi-num.red{color:var(--red)}
+.kpi-num.amber{color:var(--amber)}
+.kpi-num.teal{color:var(--teal)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+.card-title{font-size:14px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:6px}
+.chair-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:20px}
+.chair-card{
+  background:#fff;border:1px solid var(--line);border-radius:14px;
+  padding:14px 16px;cursor:default;
+}
+.chair-card.occupied{background:var(--green-soft);border-color:#a7f3d0}
+.chair-card.urgent{background:var(--red-soft);border-color:#fecaca}
+.chair-card.pending{background:var(--amber-soft);border-color:#fde68a}
+.chair-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.chair-name{font-size:14px;font-weight:800;flex:1}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.dot-on{background:#10b981}
+.dot-off{background:#d1d5db}
+.dot-urgent{background:#ef4444}
+.dot-pending{background:#f59e0b}
+.chair-patient{font-size:14px;font-weight:700;margin-bottom:2px}
+.chair-tx{font-size:12.5px;color:var(--sub);margin-bottom:6px;line-height:1.4}
+.chair-idle{font-size:12px;color:var(--muted)}
+.chair-rule{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;display:inline-block;margin-top:4px}
+.rule-ok{background:var(--green-soft);color:var(--green)}
+.rule-warn{background:var(--red-soft);color:var(--red)}
+.rule-pending{background:var(--amber-soft);color:var(--amber)}
+.rule-empty{background:var(--soft);color:var(--muted)}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.badge-urgent{background:#fecaca;color:var(--red)}
+.badge-pending{background:#fde68a;color:var(--amber)}
+.badge-on{background:var(--green-soft);color:var(--green)}
+.badge-off{background:var(--soft);color:var(--muted)}
+.chart-wrap{width:100%;overflow:hidden}
+svg.bar-chart{width:100%;height:140px;overflow:visible}
+.bar-label{font:600 11.5px var(--font);fill:var(--sub)}
+.bar-val{font:700 11.5px var(--font);fill:var(--ink)}
+.busy-bar{fill:#2a85ff;rx:4}
+.empty-bar{fill:#e5e7eb;rx:4}
+.timeline{display:flex;flex-direction:column;gap:6px}
+.tl-row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.tl-row:last-child{border-bottom:0}
+.tl-time{font-size:11.5px;color:var(--muted);min-width:40px;padding-top:1px}
+.tl-dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:3px}
+.tl-dot-urgent{background:#ef4444}
+.tl-dot-ok{background:#10b981}
+.tl-dot-info{background:#2a85ff}
+.tl-text{font-size:13px;flex:1}
+.tl-chair{font-size:11.5px;color:var(--muted);margin-top:1px}
+.empty-state{padding:24px;text-align:center;color:var(--muted);font-size:13px}
+.spinner{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--blue);animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.updated{font-size:11.5px;color:var(--muted);text-align:right;margin-top:16px}
+</style>
+<body>
+<div class="wrap" id="app">
+  <div class="page-head">
+    <div><div class="page-title">모닝 대시보드</div></div>
+  </div>
+  <div class="empty-state"><span class="spinner"></span>불러오는 중…</div>
+</div>
+<script>
+'use strict'
+
+/**
+ * @typedef {{
+ *   chairId: number, chairName: string, occupied: boolean,
+ *   urgent: boolean, pending: boolean,
+ *   patientName: string|null, treatmentLine: string|null,
+ *   idleMinutes: number, ruleName: string|null, matchStatus: 'ok'|'warn'|'pending'|'none'
+ * }} LargeChair
+ *
+ * @typedef {{
+ *   date: string, total: number, occupied: number, free: number,
+ *   urgent: number, pending: number, occupancy: number,
+ *   chairs: LargeChair[], hourly: number[]
+ * }} LargeData
+ */
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+}
+
+/** @param {number[]} hourly */
+function buildBarChart(hourly) {
+  const max = Math.max(...hourly, 1)
+  const W = 100
+  const barW = W / hourly.length * 0.7
+  const gap = W / hourly.length
+  const H = 100
+
+  const bars = hourly.map((v, i) => {
+    const h = max > 0 ? (v / max * H * 0.8) : 0
+    const x = i * gap + gap * 0.15
+    const y = H - h
+    const label = `${i + 8}시`
+    return `
+      <rect x="${x}%" y="${y}%" width="${barW}%" height="${h}%" rx="3" fill="${v > 0 ? '#2a85ff' : '#e5e7eb'}"/>
+      <text x="${x + barW/2}%" y="98%" text-anchor="middle" class="bar-label">${esc(label)}</text>
+      ${v > 0 ? `<text x="${x + barW/2}%" y="${y - 2}%" text-anchor="middle" class="bar-val">${v}</text>` : ''}
+    `
+  }).join('')
+
+  return `<svg class="bar-chart" viewBox="0 0 100 110" preserveAspectRatio="none">${bars}</svg>`
+}
+
+/** @param {LargeChair[]} chairs */
+function buildTimeline(chairs) {
+  const events = chairs
+    .filter(c => c.occupied)
+    .map(c => ({
+      urgent: c.urgent,
+      pending: c.pending,
+      name: c.patientName ?? '환자',
+      chair: c.chairName,
+      tx: c.treatmentLine ?? '',
+      idleMinutes: c.idleMinutes,
+    }))
+    .sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0))
+
+  if (!events.length) return '<div class="empty-state">현재 진행 중인 진료가 없어요</div>'
+
+  return `<div class="timeline">${events.map(e => {
+    const dotCls = e.urgent ? 'tl-dot-urgent' : e.pending ? 'tl-dot-info' : 'tl-dot-ok'
+    const now = new Date()
+    now.setMinutes(now.getMinutes() - (e.idleMinutes || 0))
+    const time = now.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'})
+    const statusText = e.urgent ? '비상 상황' : e.pending ? '접수 대기' : '진료 중'
+    return `<div class="tl-row">
+      <span class="tl-time">${time}</span>
+      <span class="tl-dot ${dotCls}"></span>
+      <div>
+        <div class="tl-text">${esc(e.name)} 님 — ${esc(statusText)}</div>
+        <div class="tl-chair">${esc(e.chair)} · ${esc(e.tx)}</div>
+      </div>
+    </div>`
+  }).join('')}</div>`
+}
+
+/** @param {LargeData} d */
+function render(d) {
+  const chairsHtml = d.chairs.map(c => {
+    const cls = c.urgent ? 'urgent' : c.pending ? 'pending' : c.occupied ? 'occupied' : ''
+    const dotCls = c.urgent ? 'dot-urgent' : c.pending ? 'dot-pending' : c.occupied ? 'dot-on' : 'dot-off'
+    const badgeCls = c.urgent ? 'badge-urgent' : c.pending ? 'badge-pending' : c.occupied ? 'badge-on' : 'badge-off'
+    const badgeText = c.urgent ? '🚨 비상' : c.pending ? '📋 접수' : c.occupied ? '진료 중' : '비어 있음'
+    const ruleCls = c.matchStatus === 'ok' ? 'rule-ok' : c.matchStatus === 'warn' ? 'rule-warn' : c.matchStatus === 'pending' ? 'rule-pending' : 'rule-empty'
+    return `<div class="chair-card ${cls}">
+      <div class="chair-head">
+        <span class="dot ${dotCls}"></span>
+        <span class="chair-name">${esc(c.chairName)}</span>
+        <span class="badge ${badgeCls}">${badgeText}</span>
+      </div>
+      ${c.patientName ? `<div class="chair-patient">${esc(c.patientName)} 님</div>` : ''}
+      ${c.treatmentLine ? `<div class="chair-tx">${esc(c.treatmentLine)}</div>` : ''}
+      ${c.occupied && c.idleMinutes > 0 ? `<div class="chair-idle">${c.idleMinutes}분째</div>` : ''}
+      ${c.ruleName ? `<span class="chair-rule ${ruleCls}">${esc(c.ruleName)}</span>` : ''}
+    </div>`
+  }).join('')
+
+  const now = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})
+
+  document.getElementById('app').innerHTML = `
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <div class="page-title">모닝 대시보드</div>
+          <div class="page-sub">${esc(d.date)}</div>
+        </div>
+        <button class="btn-refresh" onclick="init()">새로고침</button>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-num blue">${d.total}</div><div class="kpi-label">전체 체어</div></div>
+        <div class="kpi"><div class="kpi-num green">${d.occupied}</div><div class="kpi-label">진료 중</div></div>
+        <div class="kpi"><div class="kpi-num">${d.free}</div><div class="kpi-label">비어 있음</div></div>
+        <div class="kpi"><div class="kpi-num red">${d.urgent}</div><div class="kpi-label">비상</div></div>
+        <div class="kpi"><div class="kpi-num amber">${d.pending}</div><div class="kpi-label">접수 대기</div></div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-title">⏱ 오늘 체어 가동 (시간대별)</div>
+          <div class="chart-wrap">${buildBarChart(d.hourly)}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">📋 현재 진료 타임라인</div>
+          ${buildTimeline(d.chairs)}
+        </div>
+      </div>
+
+      <div class="card-title" style="margin-bottom:12px">🪑 체어별 상세</div>
+      <div class="chair-grid">${chairsHtml || '<div class="empty-state">체어 정보가 없어요</div>'}</div>
+
+      <div class="updated">갱신 ${now}</div>
+    </div>
+  `
+}
+
+function mockData() {
+  return { date: new Date().toLocaleDateString('ko-KR'), chairs: [
+    {chairId:1,chairName:'1번 체어',occupied:true,idleMinutes:5,receptionPending:false,patientName:'홍길동',treatmentLine:'임플란트 1단계',ruleName:'임플란트 1회',matchStatus:'ok'},
+    {chairId:2,chairName:'2번 체어',occupied:true,idleMinutes:22,receptionPending:false,patientName:'김민수',treatmentLine:'크라운 준비',ruleName:'크라운 2회',matchStatus:'warn'},
+    {chairId:3,chairName:'3번 체어',occupied:false,idleMinutes:0,receptionPending:false,patientName:null,treatmentLine:null,ruleName:null,matchStatus:'none'},
+    {chairId:4,chairName:'4번 체어',occupied:true,idleMinutes:3,receptionPending:true,patientName:'이지은',treatmentLine:'스케일링',ruleName:'스케일링',matchStatus:'pending'},
+    {chairId:5,chairName:'5번 체어',occupied:false,idleMinutes:0,receptionPending:false,patientName:null,treatmentLine:null,ruleName:null,matchStatus:'none'},
+  ]}
+}
+
+/** @returns {Promise<LargeData>} */
+async function load() {
+  let data
+  try {
+    const r = await fetch('/api-v1/chair-briefings', {headers:{accept:'application/json'}, cache:'no-store'})
+    if (!r.ok) { data = mockData() } else { data = await r.json() }
+  } catch(_) { data = mockData() }
+
+  const chairs = (data.chairs ?? []).map(c => ({
+    chairId: c.chairId,
+    chairName: c.chairName ?? `체어 ${c.chairId}`,
+    occupied: !!c.occupied,
+    urgent: !!c.occupied && c.idleMinutes > 15,
+    pending: !!c.occupied && !!c.receptionPending && !(c.idleMinutes > 15),
+    patientName: c.patientName ?? null,
+    treatmentLine: c.treatmentLine ?? null,
+    idleMinutes: c.idleMinutes ?? 0,
+    ruleName: c.ruleName ?? null,
+    matchStatus: c.matchStatus ?? 'none',
+  }))
+
+  const occupied = chairs.filter(c => c.occupied).length
+  const hourNow = new Date().getHours()
+  const hourly = Array.from({length: 10}, (_, i) => {
+    const h = 8 + i
+    return h <= hourNow ? (Math.round(occupied * (1 - Math.abs(h - hourNow) * 0.1))) : 0
+  })
+
+  return {
+    date: data.date ?? '',
+    total: chairs.length,
+    occupied,
+    free: chairs.length - occupied,
+    urgent: chairs.filter(c => c.urgent).length,
+    pending: chairs.filter(c => c.pending).length,
+    occupancy: chairs.length > 0 ? Math.round(occupied / chairs.length * 100) : 0,
+    chairs,
+    hourly,
+  }
+}
+
+async function init() {
+  try {
+    const d = await load()
+    render(d)
+  } catch(e) {
+    document.getElementById('app').innerHTML =
+      `<div class="wrap"><div style="color:var(--red);font-size:13px;padding:20px">오류: ${esc(String(e))}</div></div>`
+  }
+}
+
+init()
+setInterval(() => { if (!document.hidden) init() }, 30000)
+</script>

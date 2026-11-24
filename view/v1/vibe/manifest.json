@@ -1,0 +1,49 @@
+{
+  "sites": [
+    {
+      "slug": "desk-home",
+      "filename": "desk-home.html",
+      "memo": "vibe-pages",
+      "bytes": 44721,
+      "created_at": "2026-10-14 16:16:39",
+      "updated_at": "2026-10-14 17:09:27",
+      "url": "/view-v1/vibe/sites/desk-home/"
+    },
+    {
+      "slug": "claim-report-20261014",
+      "filename": "claim_report_20261014.html",
+      "memo": "",
+      "bytes": 486403,
+      "created_at": "2026-10-14 10:51:42",
+      "updated_at": "2026-10-14 10:51:42",
+      "url": "/view-v1/vibe/sites/claim-report-20261014/"
+    },
+    {
+      "slug": "today-intake",
+      "filename": "today-intake.html",
+      "memo": "vibe-pages",
+      "bytes": 4784,
+      "created_at": "2026-10-14 08:59:18",
+      "updated_at": "2026-10-14 08:59:18",
+      "url": "/view-v1/vibe/sites/today-intake/"
+    },
+    {
+      "slug": "clinic-reception",
+      "filename": "clinic-reception.html",
+      "memo": "",
+      "bytes": 105332,
+      "created_at": "2026-10-13 15:39:11",
+      "updated_at": "2026-10-13 15:39:11",
+      "url": "/view-v1/vibe/sites/clinic-reception/"
+    },
+    {
+      "slug": "reception-intake-2",
+      "filename": "reception-intake-2.html",
+      "memo": "",
+      "bytes": 131533,
+      "created_at": "2026-10-13 15:39:06",
+      "updated_at": "2026-10-13 15:39:06",
+      "url": "/view-v1/vibe/sites/reception-intake-2/"
+    }
+  ]
+}

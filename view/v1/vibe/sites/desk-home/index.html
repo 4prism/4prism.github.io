@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>데스크 홈</title>
+<style>
+  :root { --bg:#f3f3f0; --card:#fff; --col:#e9e9e4; --fg:#1b1b19; --mut:#6b6b65; --line:#dedeD7; --hover:#f6f6f2;
+    --appt:#6b6b65; --notice:#7a5c12; --reception:#2f6f5e; --change:#345c9c; --room:#5b3f9a; --pay:#9a3b2f; --done:#6b6b65; --sel:#1b1b19;
+    --ok:#2f7d4f; --ok-bg:#e3f2e7; --warn:#8a5a00; --warn-bg:#fbefd6; --bad:#b0302b; --bad-bg:#fce4e2; --info:#345c9c; --info-bg:#e5ecf8 }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121211; --card:#1f1f1d; --col:#191918; --fg:#ededE8; --mut:#9c9c95; --line:#2e2e2b; --hover:#272725;
+    --appt:#9c9c95; --notice:#e3c47a; --reception:#7cc7b0; --change:#9db8ea; --room:#c3a9f0; --pay:#f0a397; --done:#9c9c95; --sel:#ededE8;
+    --ok:#86d3a2; --ok-bg:#1c3324; --warn:#f0c46a; --warn-bg:#3a2f16; --bad:#f39893; --bad-bg:#3e1e1d; --info:#9db8ea; --info-bg:#1f2a3d } }
+  * { box-sizing:border-box } html,body { margin:0 } body { font:14px/1.4 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:var(--bg); color:var(--fg) }
+  button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; padding:0 }
+  .wrap { padding:12px 14px 16px }
+  header { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin-bottom:10px }
+  h1 { font-size:19px; margin:0; font-weight:700 } .clock { color:var(--mut); font-variant-numeric:tabular-nums }
+  .search { margin-left:auto; flex:0 1 320px; min-width:160px } .search input { width:100%; font:inherit; padding:7px 11px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg) }
+  .chips { display:flex; gap:6px; flex-wrap:wrap }
+  .chip { font-size:12px; padding:3px 9px; border-radius:999px; background:var(--card); border:1px solid var(--line); color:var(--mut); white-space:nowrap }
+  .chip.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent } .chip.bad { background:var(--bad-bg); color:var(--bad); border-color:transparent } .chip.warn { background:var(--warn-bg); color:var(--warn); border-color:transparent }
+  .alert { background:var(--bad-bg); color:var(--bad); border-radius:10px; padding:8px 12px; margin-bottom:8px; font-size:13px }
+  .todo { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px }
+  .todo .t0 { font-weight:700; margin-right:4px } .pill { font-size:13px; padding:4px 10px; border-radius:999px; background:var(--card); border:1px solid var(--line) }
+  .pill b { font-variant-numeric:tabular-nums } .pill.od { background:var(--bad); color:#fff; border-color:transparent } .pill.on { outline:2px solid var(--sel) }
+  .todo-list { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px 10px; margin:-4px 0 10px; font-size:13px }
+  .todo-list .r { display:flex; gap:10px; padding:4px 2px; border-bottom:1px solid var(--line) } .todo-list .r:last-child { border:0 } .todo-list .r.od { color:var(--bad) } .todo-list .r span:last-child { margin-left:auto; color:var(--mut) }
+
+  .board { display:grid; grid-template-columns:repeat(6,minmax(170px,1fr)) minmax(120px,.6fr); gap:8px; overflow-x:auto; padding-bottom:4px }
+  .col { background:var(--col); border-radius:12px; display:flex; flex-direction:column; min-height:200px; max-height:calc(100vh - 170px) }
+  .col.drop { outline:2px dashed var(--sel); outline-offset:-2px }
+  .col-h { padding:10px 10px 6px; border-top:3px solid var(--c); border-radius:12px 12px 0 0 }
+  .col-h .l { font-weight:700; color:var(--c) } .col-h .n { float:right; font-size:20px; font-weight:700; color:var(--c); line-height:1; font-variant-numeric:tabular-nums } .col-h .h { font-size:11px; color:var(--mut) }
+  .col-b { overflow-y:auto; padding:0 6px 8px; flex:1 }
+  .col[data-k=appt] { --c:var(--appt) } .col[data-k=notice] { --c:var(--notice) } .col[data-k=reception] { --c:var(--reception) } .col[data-k=change] { --c:var(--change) } .col[data-k=room] { --c:var(--room) } .col[data-k=pay] { --c:var(--pay) } .col[data-k=done] { --c:var(--done) }
+  .hr { font-size:11px; color:var(--mut); padding:6px 4px 2px; position:sticky; top:0; background:var(--col); z-index:1 } .hr.now { color:var(--bad); font-weight:700 }
+  .card { background:var(--card); border-radius:8px; padding:6px 8px; margin-top:5px; cursor:grab; border:1px solid transparent; user-select:none }
+  .card:hover { border-color:var(--line) } .card.dragging { opacity:.4 } .card.hit { border-color:var(--sel); box-shadow:0 0 0 2px var(--sel) inset }
+  .card.urgent { border-left:3px solid var(--bad) } .card.compact { padding:3px 8px; margin-top:3px }
+  .card .l1 { display:flex; gap:6px; align-items:baseline } .card .tm { color:var(--mut); font-size:12px; font-variant-numeric:tabular-nums } .card .nm { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .card .el { margin-left:auto; color:var(--mut); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap }
+  .card .l2 { display:flex; flex-wrap:wrap; gap:3px; margin-top:3px } .card .note { color:var(--mut); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px }
+  .tag { font-size:10.5px; padding:0 6px; border-radius:5px; white-space:nowrap; background:var(--hover); color:var(--mut); line-height:17px }
+  .tag.ok { background:var(--ok-bg); color:var(--ok) } .tag.warn { background:var(--warn-bg); color:var(--warn) } .tag.bad { background:var(--bad-bg); color:var(--bad) } .tag.info { background:var(--info-bg); color:var(--info) }
+  .slot { display:flex; gap:6px; align-items:flex-start; padding:4px 2px; border-bottom:1px solid var(--line) }
+  .slot .st { flex:none; width:40px; color:var(--mut); font-size:12px; font-variant-numeric:tabular-nums; padding-top:3px } .slot .names { display:flex; flex-wrap:wrap; gap:3px }
+  .slot.past .st { color:var(--bad); font-weight:700 }
+  .nc { display:inline-flex; align-items:center; gap:3px; font-size:13px; line-height:20px; padding:0 7px; border-radius:999px; background:var(--card); border:1px solid var(--line); cursor:grab; white-space:nowrap; user-select:none }
+  .nc:hover { border-color:var(--mut) } .nc.hit { box-shadow:0 0 0 2px var(--sel) } .nc.dragging { opacity:.4 }
+  .nc i { font-style:normal; font-size:11px; font-weight:700 } .nc sup { font-size:9px; color:var(--warn); margin-left:-1px }
+  .nc.ok { background:var(--ok-bg); border-color:transparent; color:var(--ok) } .nc.ok b { color:var(--fg); font-weight:500 }
+  .nc.none { border-style:dashed } .nc.none i { color:var(--mut) }
+  .nc.late { background:var(--warn-bg); border-color:transparent } .nc.late i { color:var(--warn) }
+  .nc.call, .nc.tardy { background:var(--bad); border-color:transparent; color:#fff } .nc.skipped { border-color:var(--bad); color:var(--bad) }
+  .nc b { font-weight:500 }
+  .ng { padding:6px 2px 7px; border-bottom:1px solid var(--line) }
+  .ng-h { display:flex; gap:6px; align-items:baseline; font-size:12px; color:var(--mut); margin-bottom:4px } .ng-h .at { color:var(--fg); font-weight:700; font-variant-numeric:tabular-nums }
+  .ng-h .cn { margin-left:auto; display:flex; gap:6px; font-variant-numeric:tabular-nums } .cn .ok { color:var(--ok) } .cn .none { color:var(--mut) } .cn .late { color:var(--warn) } .cn .bad { color:var(--bad); font-weight:700 }
+  .ng.planned .ng-h .at { color:var(--mut); font-weight:500 }
+  .settled { width:100%; text-align:left; font-size:12px; color:var(--ok); padding:7px 4px; border-bottom:1px solid var(--line) } .settled b { font-variant-numeric:tabular-nums }
+  .legend { font-size:10.5px; color:var(--mut); margin-top:2px }
+  .empty { color:var(--mut); font-size:12px; padding:10px 4px } .fail { color:var(--bad); font-size:12px; padding:10px 4px }
+  .more-done { font-size:12px; color:var(--info); padding:6px 4px }
+  .sheet { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:flex-end; justify-content:center; z-index:9 }
+  .sheet > div { background:var(--card); width:min(420px,100%); border-radius:14px 14px 0 0; padding:14px 16px 18px }
+  .sheet h3 { margin:0 0 4px; font-size:16px } .sheet p { margin:0 0 10px; color:var(--mut); font-size:13px }
+  .sheet .acts { display:grid; grid-template-columns:repeat(2,1fr); gap:8px } .sheet .acts button { padding:10px; border-radius:10px; border:1px solid var(--line); font-weight:600 }
+  .sheet .acts button.pri { background:var(--sel); color:var(--card); border-color:transparent } .sheet input { font:inherit; width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:10px; margin-bottom:10px; background:var(--card); color:var(--fg) }
+  .toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--sel); color:var(--card); padding:9px 16px; border-radius:10px; font-size:13px; z-index:10; max-width:90vw }
+  .toast.err { background:var(--bad); color:#fff }
+  footer { color:var(--mut); font-size:11px; margin-top:8px }
+  @media (max-width:700px) { .board { grid-template-columns:repeat(7,82vw); scroll-snap-type:x mandatory } .col { scroll-snap-align:start; max-height:none } .search { flex-basis:100%; order:9 } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>데스크</h1><span class="clock" id="clock">-</span>
+    <div class="chips" id="chips"></div>
+    <label class="search"><input id="q" type="search" placeholder="환자 이름·차트번호" autocomplete="off"></label>
+  </header>
+  <div id="alerts"></div>
+  <div class="todo" id="todo"></div>
+  <div id="todo-list"></div>
+  <main class="board" id="board"></main>
+  <footer>카드를 다른 칸으로 끌어 놓으면 덴트웹에 반영됩니다(접수·진료실·수납·귀가). 터치 화면은 카드를 누르세요. 판단·검증은 서버가 합니다 · 30초마다 갱신</footer>
+</div>
+<div id="sheet"></div><div id="toast"></div>
+
+<!-- 순수 함수만 (fetch·DOM 금지). tests/pages/desk-home.test.mjs 가 이 블록을 불러 검증한다.
+     🔴 업무 규칙 숫자(대기 몇 분이면 경고 등)는 넣지 않는다 — 원장 확정 전. 경과 시간만 보여준다. -->
+<script id="logic">
+const Logic = (() => {
+  const KIND_ORDER = ['urgent', 'change', 'late', 'skipped', 'request', 'payment', 'intake', 'call', 'callback']
+  const KIND_LABEL = { urgent: '급한 전화', late: '지각', skipped: '알림톡 빠짐 · 전화 안내', payment: '수납 대기', intake: '문진 미작성', call: '오늘 콜', callback: '가예약 콜백' }
+  // 할 일 → 시스템이 대신 보낼 수 있는 발송 용도 (가부는 서버 /api/send/gate 가 판정)
+  const PURPOSE = { request: 'reach_action', late: 'reach_action', payment: 'payment_request', intake: 'initial_intake' }
+  const PURPOSE_LABEL = { reach_action: '요청 회신·지각 안내', payment_request: '수납 안내', initial_intake: '문진 링크' }
+  // 🔴 아래 숫자는 01 1시간 전 알림톡 기획에서 원장이 정한 값 (모닝플러스3 알림톡/01 README · 4_모닝플러스연동)
+  const DECIDED = { lateUrgentMin: 30, requestOverdueMin: 10, urgentOverdueMin: 5 }
+  const OPEN = new Set(['requested', 'pending', 'working'])
+  const STATUS = ['접수', '준비완료', '진료 중', '진료완료', '수납완료']
+
+  function parseStamp(s) {
+    const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(s || '')
+    return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}` : null
+  }
+  // 서버 "YYYY-MM-DD HH:mm:ss" 또는 ISO → 같은 형식
+  const norm = (s) => (s ? String(s).replace(' ', 'T') : null)
+  const asUtc = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10), +iso.slice(11, 13), +iso.slice(14, 16), +(iso.slice(17, 19) || 0))
+  function minutesSince(iso, nowIso) {
+    if (!iso || !nowIso) return null
+    return Math.max(0, Math.floor((asUtc(nowIso) - asUtc(iso)) / 60000))
+  }
+  function seoulNow(d) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(d).map((x) => [x.type, x.value]))
+    return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`
+  }
+
+  // 서버 상태 코드 → 구역. 점유 = status ∈ {1,2} AND chairId > 0 (서버 명세)
+  function zoneOf(r) {
+    if (r.status === 4) return 'done'
+    if (r.status === 2) return 'room'
+    if (r.status === 1 && r.chairId > 0) return 'room'
+    return 'desk'
+  }
+  function zones(receptions) {
+    const list = receptions || []
+    const desk = list.filter((r) => zoneOf(r) === 'desk')
+    const room = list.filter((r) => zoneOf(r) === 'room')
+    return {
+      desk: { total: desk.length, waiting: desk.filter((r) => r.status !== 3).length, payment: desk.filter((r) => r.status === 3).length },
+      room: { total: room.length, chairs: new Set(room.map((r) => r.chairId).filter((c) => c > 0)).size },
+      consult: { total: null, reason: '상담실 위치 데이터 없음' },
+      done: list.filter((r) => zoneOf(r) === 'done').length,
+    }
+  }
+  function zoneRows(receptions, nowIso) {
+    const rows = { desk: [], room: [] }
+    for (const r of [...(receptions || [])].sort((a, b) => String(a.receivedAt).localeCompare(String(b.receivedAt)))) {
+      const z = zoneOf(r)
+      if (z === 'done') continue
+      const since = parseStamp(z === 'room' ? r.treatStartAt || r.receivedAt : r.receivedAt)
+      rows[z].push({ name: r.name || '', state: STATUS[r.status] ?? '?', chair: r.chairId > 0 ? r.chairId : null, detail: r.treatmentDetail || '', isNew: !!r.isNewPatient, mins: minutesSince(since, nowIso) })
+    }
+    return rows
+  }
+
+  const hhmmOf = (stamp) => { const m = /^\d{8}(\d{2})(\d{2})/.exec(String(stamp || '')); return m ? `${m[1]}:${m[2]}` : null }
+  const addMin = (hhmm, n) => { const t = +hhmm.slice(0, 2) * 60 + +hhmm.slice(3, 5) + n; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}` }
+
+  // 내원 전 — 오늘 예약(사람이 오는 것만, 서버 care_only) 중 아직 접수 안 한 사람
+  function preArrival({ appts, receptions, reminders, nowIso }) {
+    const arrived = new Set((receptions || []).map((r) => String(r.patientId)))
+    const first = new Map()
+    for (const a of appts || []) {
+      const id = String(a.patientId ?? '')
+      if (!id || arrived.has(id) || Number(a.status) === 2) continue
+      const prev = first.get(id)
+      if (!prev || String(a.scheduledAt) < String(prev.scheduledAt)) first.set(id, a)
+    }
+    const rem = reminders == null ? null : new Map(reminders.map((x) => [String(x.patientId), x]))
+    const nowHm = nowIso ? nowIso.slice(11, 16) : '99:99'
+    return [...first.values()].sort((x, y) => String(x.scheduledAt).localeCompare(String(y.scheduledAt))).map((a) => {
+      const time = hhmmOf(a.scheduledAt)
+      const r = rem ? rem.get(String(a.patientId)) : null
+      const reminder = rem === null ? 'unknown' : !r ? 'none' : r.skipped ? 'skipped' : r.sentAt ? 'sent' : 'none'
+      const reply = r && r.reply ? r.reply : null
+      const eta = reply === 'late' && r.lateMinutes && time ? addMin(time, r.lateMinutes) : null
+      const due = eta || time
+      const late = !!due && due < nowHm && reply !== 'cancel' && reply !== 'change'
+      const lateMins = late ? Math.floor((Date.parse(`2000-01-01T${nowHm}:00Z`) - Date.parse(`2000-01-01T${time}:00Z`)) / 60000) : 0
+      return { patientId: a.patientId, name: a.name || '', time, isNew: !!a.isNewPatient, note: a.note || '', reminder, sentAt: r ? norm(r.sentAt) : null, reply, lateMinutes: r ? r.lateMinutes || null : null, skipped: r ? r.skipped || null : null, repliedAt: r ? norm(r.repliedAt) : null, eta, late, lateMins }
+    })
+  }
+
+  function tasks({ flow, reach, calls, callbacks, appts, reminders, nowIso }) {
+    const out = []
+    const recs = (flow && flow.receptions) || []
+    for (const p of preArrival({ appts, receptions: recs, reminders, nowIso })) {
+      const base = { who: p.name, ref: p.patientId }
+      if (p.reply === 'call') out.push({ ...base, kind: 'urgent', label: KIND_LABEL.urgent, detail: '치과에서 전화 달라고 함', since: p.repliedAt })
+      else if (p.reply === 'late' && p.lateMinutes > DECIDED.lateUrgentMin) out.push({ ...base, kind: 'urgent', label: KIND_LABEL.urgent, detail: `${p.lateMinutes}분 넘게 늦는다고 함 — 오늘 진료 조정`, since: p.repliedAt })
+      else if (p.reply === 'change' || p.reply === 'cancel') out.push({ ...base, kind: 'change', label: p.reply === 'change' ? '예약 변경 요청' : '예약 취소 요청', detail: `${p.time} 예약`, since: p.repliedAt })
+      else if (p.late) out.push({ ...base, kind: 'late', label: KIND_LABEL.late, detail: `${p.time} 예약 · ${p.lateMins}분 지남`, since: nowIso ? `${nowIso.slice(0, 11)}${p.time}:00` : null })
+      if (p.reminder === 'skipped') out.push({ ...base, kind: 'skipped', label: KIND_LABEL.skipped, detail: p.skipped || '', since: null })
+    }
+    for (const a of reach || []) {
+      if (!OPEN.has(a.status)) continue
+      out.push({ kind: 'request', label: `${a.actionType || '기타'} 요청`, who: a.patientName || '', detail: (a.note || '').replace(/\s*·\s*연락처.*$/, ''), since: norm(a.createdAt), ref: a.id })
+    }
+    const checked = new Set(((flow && flow.checkins) || []).map((c) => String(c.patientRef)))
+    for (const r of recs) if (r.status === 3) out.push({ kind: 'payment', label: KIND_LABEL.payment, who: r.name || '', detail: r.treatmentDetail || '', since: parseStamp(r.treatEndAt || r.receivedAt), ref: r.patientId })
+    for (const r of recs) if (r.status <= 2 && !checked.has(String(r.patientId))) out.push({ kind: 'intake', label: KIND_LABEL.intake, who: r.name || '', detail: r.isNewPatient ? '신환' : '', since: parseStamp(r.receivedAt), ref: r.patientId })
+    for (const c of calls || []) out.push({ kind: 'call', label: KIND_LABEL.call, who: c.patientName || c.name || '', detail: c.reason || c.note || '', since: norm(c.createdAt || c.dueAt), ref: c.id })
+    for (const c of callbacks || []) out.push({ kind: 'callback', label: KIND_LABEL.callback, who: c.patientName || c.name || '', detail: c.slot || c.note || '', since: norm(c.createdAt), ref: c.id })
+    const limit = { urgent: DECIDED.urgentOverdueMin, change: DECIDED.requestOverdueMin, request: DECIDED.requestOverdueMin }
+    for (const t of out) { const m = limit[t.kind] != null && nowIso ? minutesSince(t.since, nowIso) : null; t.overdue = m != null && m >= limit[t.kind] }
+    const rank = (t) => KIND_ORDER.indexOf(t.kind)
+    return out.map((t, i) => ({ t, i }))
+      .sort((a, b) => rank(a.t) - rank(b.t) || String(a.t.since || '~').localeCompare(String(b.t.since || '~')) || a.i - b.i)
+      .map((x) => x.t)
+  }
+
+  // 무인 운영 준비도 — 할 일마다 서버 발송 판정을 붙인다
+  function automation(taskList, gate) {
+    const verdict = Object.fromEntries(((gate && gate.purposes) || []).map((p) => [p.purpose, p]))
+    const res = { total: taskList.length, ready: 0, human: 0, blocked: [] }
+    const byPurpose = new Map()
+    for (const t of taskList) {
+      const p = PURPOSE[t.kind]
+      if (!p) { res.human++; continue }
+      const v = verdict[p]
+      if (v && v.canSend) { res.ready++; continue }
+      if (!byPurpose.has(p)) byPurpose.set(p, { purpose: p, reason: v ? v.blockedReason || '발송 불가' : '발송 판정 없음', count: 0 })
+      byPurpose.get(p).count++
+    }
+    res.blocked = [...byPurpose.values()]
+    return res
+  }
+  function autoOf(task, gate) {
+    const p = PURPOSE[task.kind]
+    if (!p) return { state: 'human', text: '사람' }
+    const v = ((gate && gate.purposes) || []).find((x) => x.purpose === p)
+    if (v && v.canSend) return { state: 'ready', text: '자동 발송 가능' }
+    return { state: 'blocked', text: v && v.locked ? '잠김' : '대기(발송 꺼짐)' }
+  }
+
+  function health({ ops, flowOk, gate }) {
+    const alerts = []
+    const dw = ops && ops.통신 && ops.통신.덴트웹
+    const dentweb = !!(dw && dw.ok)
+    if (!flowOk) alerts.push(`접수·체어 조회 실패 — 0명이 아닙니다${dw && dw.detail ? ` (${dw.detail})` : ''}`)
+    for (const c of (ops && ops.checks) || []) if (!c.ok && c.id !== 'dentweb') alerts.push(`${c.title} 확인 필요${c.actionLabel ? ` → ${c.actionLabel}` : ''}`)
+    return { dentweb, sending: !!(gate && gate.masterEnabled), alerts }
+  }
+
+
+  // ───────── v3: 한 목록 · 단계 타일 · 묶음 할 일 (하루 100명+ 규모) ─────────
+  const STAGE_OF_ZONE = (r) => (r.status === 3 ? 'pay' : zoneOf(r) === 'room' ? 'room' : zoneOf(r) === 'done' ? 'done' : 'wait')
+  function patients({ appts, flow, reminders, nowIso }) {
+    const recs = (flow && flow.receptions) || []
+    const out = preArrival({ appts, receptions: recs, reminders, nowIso }).map((p) => ({ ...p, id: p.patientId, stage: 'pre', chart: '' }))
+    const chartOf = new Map((appts || []).map((a) => [String(a.patientId), a.chartNumber || '']))
+    for (const r of recs) {
+      const st = STAGE_OF_ZONE(r)
+      const since = parseStamp(st === 'room' ? r.treatStartAt || r.receivedAt : st === 'pay' ? r.treatEndAt || r.receivedAt : r.receivedAt)
+      out.push({ id: r.patientId, patientId: r.patientId, name: r.name || '', chart: r.chartNumber || chartOf.get(String(r.patientId)) || '', stage: st, time: (parseStamp(r.receivedAt) || '').slice(11, 16), chair: r.chairId > 0 ? r.chairId : null, isNew: !!r.isNewPatient, note: r.treatmentDetail || '', state: STATUS[r.status] ?? '?', mins: minutesSince(since, nowIso) })
+    }
+    for (const p of out) if (!p.chart) p.chart = chartOf.get(String(p.patientId)) || ''
+    return out
+  }
+  const ALERT_KINDS = { pre: ['late', 'change', 'urgent', 'skipped'], wait: ['intake'], room: [], pay: ['payment'], done: [] }
+  function stageCounts(list, taskList) {
+    const c = {}
+    for (const k of Object.keys(ALERT_KINDS)) c[k] = { n: 0, alert: 0 }
+    for (const p of list) if (c[p.stage]) c[p.stage].n++
+    for (const t of taskList) for (const [k, kinds] of Object.entries(ALERT_KINDS)) if (kinds.includes(t.kind)) c[k].alert++
+    return c
+  }
+  // 「지금」 보기: 앞으로 60분 안 예약·지각 + 대기 + 수납 (화면 창 크기일 뿐 업무 규칙 아님)
+  function filterPatients(list, { stage, q, nowIso }) {
+    const qq = String(q || '').trim()
+    if (qq) return list.filter((p) => p.name.includes(qq) || String(p.chart) === qq || String(p.chart).startsWith(qq) && qq.length >= 3)
+    if (stage && stage !== 'now') return list.filter((p) => p.stage === stage)
+    const until = nowIso ? `${String(+nowIso.slice(11, 13) + 1).padStart(2, '0')}:${nowIso.slice(14, 16)}` : '99:99'
+    return list.filter((p) => p.stage === 'wait' || p.stage === 'pay' || (p.stage === 'pre' && (p.late || (p.time && p.time <= until))))
+  }
+  const GROUP_LABEL = { urgent: '급한 전화', change: '예약 변경·취소', late: '지각', skipped: '알림톡 빠짐 · 전화 안내', request: '요청 (서류·문의·수납·호출)', payment: '수납 대기', intake: '문진 미작성', call: '오늘 콜', callback: '가예약 콜백' }
+  function groupTasks(taskList) {
+    const by = new Map()
+    for (const t of taskList) {
+      if (!by.has(t.kind)) by.set(t.kind, { kind: t.kind, label: GROUP_LABEL[t.kind] || t.kind, count: 0, overdue: 0, items: [] })
+      const g = by.get(t.kind); g.count++; if (t.overdue) g.overdue++; g.items.push(t)
+    }
+    return [...by.values()].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind))
+  }
+
+
+  // ───────── v4: 칸반 — 환자가 칸을 이동한다 (데스크 인·아웃 한 화면) ─────────
+  const COLUMNS = [
+    { key: 'appt', label: '예약', hint: '오늘 남은 예약' },
+    { key: 'notice', label: '사전 안내', hint: '발송 시각별 · ✓방문 ○무응답 +늦음 !확인' },
+    { key: 'reception', label: '접수·문진', hint: '왔다 · 문진' },
+    { key: 'change', label: '변경·취소', hint: '요청 · 오늘 취소' },
+    { key: 'room', label: '진료실', hint: '체어' },
+    { key: 'pay', label: '수납', hint: '진료 끝남' },
+    { key: 'done', label: '귀가', hint: '오늘 완료' },
+  ]
+  const NOTICE_WINDOW_MIN = 60 // 1시간 전 알림톡 — 원장 결정(알림톡 01)
+  function board({ appts, flow, reminders, reach, nowIso }) {
+    const b = Object.fromEntries(COLUMNS.map((c) => [c.key, []]))
+    const recs = (flow && flow.receptions) || []
+    const checked = new Set(((flow && flow.checkins) || []).map((c) => String(c.patientRef)))
+    const until = nowIso ? addMin(nowIso.slice(11, 16), NOTICE_WINDOW_MIN) : '00:00'
+    const pre = preArrival({ appts, receptions: recs, reminders, nowIso })
+    for (const p of pre) {
+      const card = { key: `a${p.patientId}`, patientId: p.patientId, name: p.name, time: p.time, receivedAt: null, chairId: null, isNew: p.isNew, note: p.note, pre: p }
+      const col = p.reply === 'change' || p.reply === 'cancel' ? 'change'
+        : p.reminder === 'sent' || p.reminder === 'skipped' || p.late || (p.time && p.time <= until) ? 'notice' : 'appt'
+      b[col].push(card)
+    }
+    const arrived = new Set(recs.map((r) => String(r.patientId)))
+    const active = new Set(pre.map((p) => String(p.patientId)))
+    const seenCancel = new Set()
+    for (const a of appts || []) {
+      const id = String(a.patientId)
+      if (Number(a.status) !== 2 || arrived.has(id) || active.has(id) || seenCancel.has(id)) continue
+      seenCancel.add(id)
+      b.change.push({ key: `c${id}`, patientId: a.patientId, name: a.name || '', time: hhmmOf(a.scheduledAt), receivedAt: null, chairId: null, cancelled: true, note: a.note || '' })
+    }
+    for (const r of reach || []) {
+      if (!OPEN.has(r.status) || !/변경|예약/.test(String(r.actionType || ''))) continue
+      b.change.push({ key: `r${r.id}`, patientId: r.patientRef ? Number(r.patientRef) : null, name: r.patientName || '', time: norm(r.createdAt) ? norm(r.createdAt).slice(11, 16) : '', receivedAt: null, chairId: null, request: true, note: r.note || '' })
+    }
+    for (const r of recs) {
+      const col = r.status === 4 ? 'done' : r.status === 3 ? 'pay' : zoneOf(r) === 'room' ? 'room' : 'reception'
+      b[col].push({ key: `r-${r.patientId}-${r.receivedAt}`, patientId: r.patientId, name: r.name || '', time: (parseStamp(r.receivedAt) || '').slice(11, 16), receivedAt: r.receivedAt, chairId: r.chairId > 0 ? r.chairId : null, isNew: !!r.isNewPatient, note: r.treatmentDetail || '', status: r.status, intake: checked.has(String(r.patientId)) })
+    }
+    for (const k of ['appt', 'notice', 'change']) b[k].sort((x, y) => String(x.time).localeCompare(String(y.time)))
+    return b
+  }
+  function colOf(card) {
+    if (card.receivedAt == null) return null
+    return card.status === 4 ? 'done' : card.status === 3 ? 'pay' : card.status === 2 || (card.status === 1 && card.chairId) ? 'room' : 'reception'
+  }
+  // 드래그 → 서버 쓰기 한 건. op 는 화면이 아는 쓰기(checkin·stage)만. 판단·검증은 서버가 다시 한다.
+  function moveAction(card, to, opts = {}) {
+    const from = colOf(card)
+    if (from === to) return { error: '같은 칸입니다' }
+    if (card.receivedAt == null) {
+      if (to !== 'reception') return { error: '먼저 「접수·문진」 칸으로 옮겨 접수하세요' }
+      if (card.patientId == null) return { error: '환자 번호가 없는 요청입니다 — 이름으로 찾아 접수하세요' }
+      return { op: 'checkin', body: { patientId: card.patientId }, label: '접수' }
+    }
+    if (to === 'appt' || to === 'notice' || to === 'change') return { error: '접수한 환자는 예약 쪽 칸으로 되돌릴 수 없습니다' }
+    const base = { receivedAt: card.receivedAt, patientId: card.patientId, patientName: card.name }
+    if (to === 'room') {
+      const chairId = opts.chairId ?? card.chairId
+      if (!chairId) return { needChair: true }
+      return { op: 'stage', body: { ...base, status: 2, chairId }, label: `진료실로 (${chairId}번 체어)` }
+    }
+    const status = { reception: 0, pay: 3, done: 4 }[to]
+    if (status == null) return { error: '옮길 수 없는 칸입니다' }
+    return { op: 'stage', body: { ...base, status }, label: { reception: '접수 대기로', pay: '수납으로', done: '귀가 처리' }[to] }
+  }
+
+
+  // ───────── v5: 시각 한 줄에 이름들 · 발송 시각별 묶음 · 응답 칩 ─────────
+  function apptSlots(cardList) {
+    const by = new Map()
+    for (const c of cardList) { const t = c.time || '--:--'; if (!by.has(t)) by.set(t, []); by.get(t).push(c) }
+    return [...by.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([time, cards]) => ({ time, cards }))
+  }
+  // 칩 하나에 실을 상태 — 할 일이 있는 상태가 앞선다
+  function replyState(card) {
+    const p = card.pre || {}
+    if (p.late) return 'tardy'
+    if (p.reminder === 'skipped') return 'skipped'
+    if (p.reply === 'call') return 'call'
+    if (p.reply === 'ok' || p.reply === 'late' || p.reply === 'change' || p.reply === 'cancel') return p.reply
+    if (p.reminder === 'sent') return 'none'
+    return 'pending'
+  }
+  const SETTLED = new Set(['ok', 'late'])
+  function noticeGroups(cardList) {
+    const by = new Map()
+    for (const c of cardList) {
+      const sent = c.pre && c.pre.sentAt ? c.pre.sentAt.slice(11, 16) : null
+      const at = sent || (c.time ? addMin(c.time, -NOTICE_WINDOW_MIN) : '--:--')
+      const k = `${sent ? 's' : 'p'}${at}`
+      if (!by.has(k)) by.set(k, { at, planned: !sent, cards: [], counts: {} })
+      const g = by.get(k); g.cards.push(c)
+      const st = replyState(c); g.counts[st] = (g.counts[st] || 0) + 1
+    }
+    const groups = [...by.values()].sort((a, b) => a.at.localeCompare(b.at) || Number(a.planned) - Number(b.planned))
+    for (const g of groups) { g.cards.sort((a, b) => String(a.time).localeCompare(String(b.time))); g.settled = !g.planned && g.cards.every((c) => SETTLED.has(replyState(c))) }
+    return groups
+  }
+
+  return { COLUMNS, board, moveAction, apptSlots, replyState, noticeGroups, parseStamp, minutesSince, seoulNow, zoneOf, zones, zoneRows, preArrival, patients, stageCounts, filterPatients, groupTasks, tasks, automation, autoOf, health, PURPOSE, PURPOSE_LABEL, DECIDED }
+})()
+</script>
+<!-- 화면: 같은 호스트 API. 쓰기는 SPEC 「쓰기 허용」 두 개뿐(접수·단계 이동), 매번 확인을 받는다 -->
+<script>
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const forcedNow = new URLSearchParams(location.search).get('now') // 목업 확인용
+const mins = (m) => (m == null ? '' : m < 60 ? `${m}분` : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`)
+const ui = { q: '', todo: null, doneAll: false, settledOpen: false }
+let last = null, cards = new Map(), dragKey = null
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'content-type': 'application/json', 'x-morning-role': 'desk', ...(opts.headers || {}) } })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok || body.ok === false) throw new Error(body.error || body.message || `HTTP ${r.status}`)
+  return body
+}
+const get = (path) => api(path)
+// 🔴 덴트웹 쓰기는 이 두 개뿐 (SPEC 「쓰기 허용」)
+const WRITES = {
+  checkin: (b) => api('/api/kiosk/checkin', { method: 'POST', body: JSON.stringify(b) }),
+  stage: (b) => api('/api/app/reception/stage', { method: 'POST', body: JSON.stringify(b) }),
+}
+
+function toast(msg, err) { $('toast').innerHTML = `<div class="toast${err ? ' err' : ''}">${esc(msg)}</div>`; clearTimeout(toast.t); toast.t = setTimeout(() => ($('toast').innerHTML = ''), err ? 6000 : 2500) }
+
+const REPLY = { ok: ['ok', '방문 확인'], change: ['info', '변경 요청'], cancel: ['bad', '취소 요청'], call: ['bad', '전화 요청'] }
+function badges(c, col) {
+  const t = [], p = c.pre
+  if (p) {
+    if (p.late) t.push(`<span class="tag bad">지각 ${p.lateMins}분</span>`)
+    if (p.reply === 'late') t.push(`<span class="tag warn">${p.lateMinutes ? `${p.lateMinutes}분 늦음→${p.eta}` : '늦음'}</span>`)
+    else if (REPLY[p.reply]) t.push(`<span class="tag ${REPLY[p.reply][0]}">${REPLY[p.reply][1]}</span>`)
+    else if (col === 'notice') t.push(p.reminder === 'skipped' ? '<span class="tag bad">알림톡 빠짐</span>' : p.reminder === 'sent' ? '<span class="tag">안내 보냄</span>' : p.reminder === 'unknown' ? '' : '<span class="tag warn">안내 전</span>')
+  }
+  if (c.cancelled) t.push('<span class="tag bad">오늘 취소</span>')
+  if (c.request) t.push('<span class="tag info">요청함</span>')
+  if (col === 'reception') t.push(c.intake ? '<span class="tag ok">문진 완료</span>' : '<span class="tag warn">문진 필요</span>')
+  if (c.chairId && (col === 'room')) t.push(`<span class="tag info">${c.chairId}번</span>`)
+  if (c.isNew) t.push('<span class="tag warn">신환</span>')
+  return t.join('')
+}
+function cardHtml(c, col) {
+  const urgent = c.pre && (c.pre.late || c.pre.reply === 'call' || c.pre.reply === 'change' || c.pre.reply === 'cancel' || c.pre.reminder === 'skipped')
+  const since = c.receivedAt ? Logic.minutesSince(Logic.parseStamp(c.receivedAt), last.nowIso) : null
+  const hit = ui.q && (c.name.includes(ui.q)) ? ' hit' : ''
+  const compact = col === 'appt' || col === 'done'
+  const b = badges(c, col)
+  return `<div class="card${urgent ? ' urgent' : ''}${compact ? ' compact' : ''}${hit}" draggable="true" data-key="${esc(c.key)}">
+    <div class="l1"><span class="tm">${esc(c.time || '')}</span><span class="nm">${esc(c.name)}</span><span class="el">${col === 'room' || col === 'reception' || col === 'pay' ? mins(since) : ''}</span></div>
+    ${!compact && b ? `<div class="l2">${b}</div>` : compact && b ? `<div class="l2">${b}</div>` : ''}
+    ${!compact && c.note ? `<div class="note">${esc(c.note)}</div>` : ''}</div>`
+}
+const MARK = { ok: '✓', none: '○', call: '☎', skipped: '✕', tardy: '지각', pending: '' }
+function chip(c) {
+  const st = Logic.replyState(c), p = c.pre || {}
+  const mark = st === 'late' ? `+${p.lateMinutes || ''}` : st === 'tardy' ? `지각${p.lateMins}` : MARK[st] || ''
+  const hit = ui.q && c.name.includes(ui.q) ? ' hit' : ''
+  const title = [c.time && `${c.time} 예약`, p.eta && `${p.eta} 도착 예정`, p.skipped, c.note].filter(Boolean).join(' · ')
+  return `<span class="nc ${st}${hit}" draggable="true" data-key="${esc(c.key)}" title="${esc(title)}"><b>${esc(c.name)}</b>${c.isNew ? '<sup>신</sup>' : ''}${mark ? `<i>${esc(mark)}</i>` : ''}</span>`
+}
+function countsHtml(n) {
+  const out = []
+  if (n.ok) out.push(`<span class="ok">✓${n.ok}</span>`)
+  if (n.late) out.push(`<span class="late">+${n.late}</span>`)
+  if (n.none) out.push(`<span class="none">○${n.none}</span>`)
+  const bad = (n.call || 0) + (n.skipped || 0) + (n.tardy || 0)
+  if (bad) out.push(`<span class="bad">!${bad}</span>`)
+  return out.join('')
+}
+function colBody(k, list) {
+  if (k === 'appt') {
+    const nowHm = last.nowIso.slice(11, 16)
+    return Logic.apptSlots(list).map((sl) => `<div class="slot${sl.time < nowHm ? ' past' : ''}" data-hour="${sl.time.slice(0, 2)}"><span class="st">${esc(sl.time)}</span><span class="names">${sl.cards.map(chip).join('')}</span></div>`).join('')
+  }
+  if (k === 'notice') {
+    const groups = Logic.noticeGroups(list)
+    const done = groups.filter((g) => g.settled), open = groups.filter((g) => !g.settled)
+    const grp = (g) => `<div class="ng${g.planned ? ' planned' : ''}"><div class="ng-h"><span class="at">${esc(g.at)}</span><span>${g.planned ? '발송 예정' : '발송'} · ${g.cards.length}명</span><span class="cn">${g.planned ? '' : countsHtml(g.counts)}</span></div><div class="names">${g.cards.map(chip).join(' ')}</div></div>`
+    const doneN = done.reduce((s, g) => s + g.cards.length, 0)
+    return (done.length ? `<button class="settled" id="settled">${ui.settledOpen ? '▾' : '▸'} 응답 완료 <b>${doneN}</b>명 · ${done.length}묶음</button>${ui.settledOpen ? done.map(grp).join('') : ''}` : '') + open.map(grp).join('')
+  }
+  if (k === 'done' && !ui.doneAll && list.length > 8) return list.slice(-8).map((c) => cardHtml(c, k)).join('') + `<button class="more-done" id="done-all">전체 ${list.length}명 보기</button>`
+  return list.map((c) => cardHtml(c, k)).join('')
+}
+function renderBoard() {
+  const b = last.board
+  cards = new Map(Object.entries(b).flatMap(([k, list]) => list.map((c) => [c.key, { ...c, col: k }])))
+  const fails = { appt: !last.apptOk && '예약 조회 실패 — 0명이 아님', notice: !last.apptOk && '예약 조회 실패', change: !last.apptOk && '예약 조회 실패', reception: !last.flowOk && '접수 조회 실패 — 0명이 아님', room: !last.flowOk && '접수 조회 실패', pay: !last.flowOk && '접수 조회 실패', done: !last.flowOk && '접수 조회 실패' }
+  const scroll = Object.fromEntries([...document.querySelectorAll('.col-b')].map((el) => [el.parentElement.dataset.k, el.scrollTop]))
+  $('board').innerHTML = Logic.COLUMNS.map(({ key, label, hint }) => `<section class="col" data-k="${key}">
+    <div class="col-h"><span class="n">${fails[key] ? '?' : b[key].length}</span><div class="l">${label}</div><div class="h">${hint}</div></div>
+    <div class="col-b">${fails[key] ? `<div class="fail">${fails[key]}</div>` : ''}${b[key].length ? colBody(key, b[key]) : fails[key] ? '' : '<div class="empty">없음</div>'}</div></section>`).join('')
+  for (const el of document.querySelectorAll('.col-b')) { const k = el.parentElement.dataset.k; if (scroll[k] != null) el.scrollTop = scroll[k] }
+  if (!renderBoard.scrolled) { const now = document.querySelector(`.col[data-k=appt] .slot:not(.past)`); if (now) now.parentElement.scrollTop = now.offsetTop - 40; renderBoard.scrolled = true }
+  const done = $('done-all'); if (done) done.onclick = () => { ui.doneAll = true; renderBoard() }
+  if (ui.q) { const h = document.querySelector('.card.hit,.nc.hit'); if (h) h.scrollIntoView({ block: 'nearest', inline: 'nearest' }) }
+}
+function renderTodo(tasks) {
+  const groups = Logic.groupTasks(tasks)
+  $('todo').innerHTML = groups.length ? `<span class="t0">할 일 ${tasks.length}</span>` + groups.map((g) => `<button class="pill${g.overdue ? ' od' : ''}${ui.todo === g.kind ? ' on' : ''}" data-kind="${g.kind}">${esc(g.label)} <b>${g.count}</b></button>`).join('') : '<span class="t0" style="color:var(--ok)">처리할 일 없음</span>'
+  const g = groups.find((x) => x.kind === ui.todo)
+  $('todo-list').innerHTML = g ? `<div class="todo-list">${g.items.map((t) => `<div class="r${t.overdue ? ' od' : ''}"><b>${esc(t.who) || '-'}</b><span>${esc(t.label === g.label ? t.detail : t.label + (t.detail ? ' · ' + t.detail : ''))}</span><span>${mins(Logic.minutesSince(t.since, last.nowIso))} · ${esc(Logic.autoOf(t, last.gate).text)}</span></div>`).join('')}</div>` : ''
+}
+
+// ── 이동: 드래그 또는 카드 누르기 ──
+function sheet(html) { $('sheet').innerHTML = html ? `<div class="sheet"><div>${html}</div></div>` : '' }
+async function doMove(card, to, opts = {}) {
+  const act = Logic.moveAction(card, to, opts)
+  if (act.error) return toast(act.error, true)
+  if (act.needChair) {
+    sheet(`<h3>${esc(card.name)} → 진료실</h3><p>몇 번 체어로 들어가나요?</p><input id="chair" inputmode="numeric" placeholder="체어 번호"><div class="acts"><button id="s-no">취소</button><button class="pri" id="s-ok">진료실로</button></div>`)
+    $('chair').focus()
+    $('s-no').onclick = () => sheet('')
+    $('s-ok').onclick = () => { const n = parseInt($('chair').value, 10); if (!(n > 0)) return toast('체어 번호를 넣어 주세요', true); sheet(''); doMove(card, to, { chairId: n }) }
+    return
+  }
+  sheet(`<h3>${esc(card.name)} — ${esc(act.label)}</h3><p>덴트웹에 바로 반영됩니다.</p><div class="acts"><button id="s-no">취소</button><button class="pri" id="s-ok">${esc(act.label)}</button></div>`)
+  $('s-no').onclick = () => sheet('')
+  $('s-ok').onclick = async () => {
+    sheet('')
+    try { const r = await WRITES[act.op](act.body); toast(r.data && r.data.alreadyReceived ? `${card.name} — 이미 접수돼 있습니다` : `${card.name} — ${act.label} 완료`); load() }
+    catch (e) { toast(`${card.name} — 반영 실패: ${e.message}`, true) }
+  }
+}
+function openCard(card) {
+  const targets = Logic.COLUMNS.filter((c) => c.key !== card.col && !Logic.moveAction(card, c.key, { chairId: 1 }).error)
+  sheet(`<h3>${esc(card.name)}</h3><p>${esc([card.time, card.note].filter(Boolean).join(' · '))}</p><div class="acts">${targets.map((t) => `<button data-to="${t.key}">${esc(t.label)}(으)로</button>`).join('') || '<span style="color:var(--mut)">옮길 수 있는 칸이 없습니다</span>'}<button id="s-no">닫기</button></div>`)
+  $('s-no').onclick = () => sheet('')
+  for (const btn of document.querySelectorAll('.sheet [data-to]')) btn.onclick = () => { sheet(''); doMove(card, btn.dataset.to) }
+}
+const boardEl = () => $('board')
+boardEl().addEventListener('dragstart', (e) => { const el = e.target.closest('.card,.nc'); if (!el) return; dragKey = el.dataset.key; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move' })
+boardEl().addEventListener('dragend', (e) => { const el = e.target.closest('.card,.nc'); if (el) el.classList.remove('dragging'); for (const c of document.querySelectorAll('.col.drop')) c.classList.remove('drop') })
+boardEl().addEventListener('dragover', (e) => { const col = e.target.closest('.col'); if (!col || !dragKey) return; e.preventDefault(); for (const c of document.querySelectorAll('.col.drop')) if (c !== col) c.classList.remove('drop'); col.classList.add('drop') })
+boardEl().addEventListener('drop', (e) => { const col = e.target.closest('.col'); if (!col || !dragKey) return; e.preventDefault(); col.classList.remove('drop'); const card = cards.get(dragKey); dragKey = null; if (card) doMove(card, col.dataset.k) })
+boardEl().addEventListener('click', (e) => { if (e.target.closest('#settled')) { ui.settledOpen = !ui.settledOpen; return renderBoard() } const el = e.target.closest('.card,.nc'); if (!el) return; const card = cards.get(el.dataset.key); if (card) openCard(card) })
+$('todo').addEventListener('click', (e) => { const b = e.target.closest('[data-kind]'); if (!b) return; ui.todo = ui.todo === b.dataset.kind ? null : b.dataset.kind; renderTodo(last.tasks) })
+$('q').addEventListener('input', (e) => { ui.q = e.target.value.trim(); renderBoard() })
+
+async function load() {
+  const nowIso = forcedNow || Logic.seoulNow(new Date())
+  $('clock').textContent = nowIso.replace('T', ' ').slice(0, 16)
+  const [flowR, reachR, callsR, cbR, gateR, opsR, apptR, remR] = await Promise.allSettled([
+    get('/api/app/flow'), get('/api/reach-action'), get('/api/call-actions'), get('/api/call-actions/callbacks'), get('/api/send/gate'), get('/api/ops/status'),
+    get('/api/dw/appointments?care_only=1'),
+    // 1시간 전 알림톡 발송·환자 응답 — 모닝플러스3 알림톡/01 연동 결과를 이 서버가 내려줄 자리 (SPEC 「연결 계약」). 없으면 「연결 필요」
+    get('/api/reminder/today'),
+  ])
+  const val = (r, k) => (r.status === 'fulfilled' ? r.value[k] : null)
+  const flow = val(flowR, 'data'), gate = val(gateR, 'data'), ops = val(opsR, 'data'), appts = val(apptR, 'data'), reminders = val(remR, 'items'), reach = val(reachR, 'items')
+  const h = Logic.health({ ops, flowOk: !!flow, gate })
+  $('chips').innerHTML = [
+    `<span class="chip ${h.dentweb ? 'ok' : 'bad'}">덴트웹 ${h.dentweb ? '연결' : '끊김'}</span>`,
+    `<span class="chip ${h.sending ? 'ok' : 'warn'}">알림톡 ${h.sending ? '발송 켜짐' : '발송 꺼짐'}</span>`,
+    `<span class="chip ${reminders ? 'ok' : 'warn'}">1시간 전 응답 ${reminders ? '연결' : '연결 필요'}</span>`,
+  ].join('')
+  $('alerts').innerHTML = h.alerts.map((a) => `<div class="alert">${esc(a)}</div>`).join('')
+  const base = { appts, flow, reminders, nowIso }
+  const tasks = Logic.tasks({ ...base, reach, calls: val(callsR, 'items'), callbacks: val(cbR, 'items') })
+  last = { nowIso, gate, tasks, flowOk: !!flow, apptOk: !!appts, board: Logic.board({ ...base, reach }) }
+  renderTodo(tasks)
+  renderBoard()
+}
+load(); setInterval(() => { if (!$('sheet').innerHTML && !dragKey) load() }, 30000)
+</script>
+</body>
+</html>

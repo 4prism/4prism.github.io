@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>모닝 view-v1 화면 목록</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.6 "Apple SD Gothic Neo",sans-serif;background:#f3f4f6;color:#111827}
+header{background:#111827;color:#fff;padding:16px 20px;position:sticky;top:0;z-index:10}
+header h1{font-size:17px;font-weight:900;letter-spacing:-.5px}
+header p{font-size:12px;color:#9ca3af;margin-top:2px}
+.wrap{padding:16px;display:flex;flex-direction:column;gap:20px}
+.sec-title{font-size:14px;font-weight:900;color:#374151;margin-bottom:8px;padding-left:2px;display:flex;align-items:center;gap:8px}
+.type-badge{display:inline-flex;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700}
+.ti{background:#fef2f2;color:#b91c1c}
+.mi{background:#eff6ff;color:#1d4ed8}
+.lo{background:#ecfdf5;color:#047857}
+.ov{background:#fffbeb;color:#b45309}
+.ex{background:#f3f4f6;color:#9ca3af}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.card{background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;cursor:pointer;transition:box-shadow .15s}
+.card:hover{box-shadow:0 4px 16px rgba(0,0,0,.1);border-color:#d1d5db}
+.card-preview{height:120px;background:#f9fafb;display:flex;align-items:center;justify-content:center;font-size:36px;position:relative;border-bottom:1px solid #f3f4f6}
+.card-preview iframe{width:100%;height:100%;border:none;pointer-events:none;transform-origin:top left}
+.card-info{padding:10px 12px}
+.card-name{font-size:12.5px;font-weight:800;color:#111827;margin-bottom:2px}
+.card-desc{font-size:11px;color:#9ca3af;line-height:1.4}
+.card-tags{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.tag{font-size:10px;padding:1px 6px;border-radius:999px;background:#f3f4f6;color:#6b7280;font-weight:600}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:16px;width:min(90vw,800px);height:min(90vh,600px);display:flex;flex-direction:column;overflow:hidden}
+.modal-head{padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px}
+.modal-title{font-size:14px;font-weight:800;flex:1}
+.modal-close{border:none;background:none;cursor:pointer;font-size:20px;color:#9ca3af;padding:0 4px}
+.modal-close:hover{color:#374151}
+.modal-iframe{flex:1;border:none;background:#f9fafb}
+.modal-url{font-size:11px;color:#9ca3af;padding:6px 16px;border-top:1px solid #f3f4f6;background:#fafafa}
+.soon{opacity:.5;cursor:default}
+.soon .card-preview{background:#f9fafb}
+</style>
+<body>
+<header>
+  <h1>모닝 view-v1 화면 목록</h1>
+  <p>26개 화면 · 클릭하면 미리보기 · 2026-11-25</p>
+</header>
+<div class="wrap">
+
+<div>
+  <div class="sec-title"><span class="type-badge ti">🔴 interrupt</span> 팝업 — 업무 중단 알림 (2개)</div>
+  <div class="grid">
+    <div class="card" onclick="openModal('모닝 — 수신전화·자동발송 팝업','pages/morning-popup.html')">
+      <div class="card-preview">📞</div>
+      <div class="card-info">
+        <div class="card-name">morning-popup</div>
+        <div class="card-desc">수신전화 알림 · 자동발송 카운트다운 · 60초 자동닫힘</div>
+        <div class="card-tags"><span class="tag">incoming_call</span><span class="tag">countdown</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="sec-title"><span class="type-badge mi">🔵 mini-work</span> 미니창 — 덴트웹 옆 항상 (15개)</div>
+  <div class="grid">
+    <div class="card" onclick="openModal('모닝 — 미니창 (접수/발신/통화중)','pages/morning-mini.html')">
+      <div class="card-preview">📋</div>
+      <div class="card-info">
+        <div class="card-name">morning-mini</div>
+        <div class="card-desc">접수/발신/통화중 역할 탭 · 행 액션 버튼 · 항상 표시</div>
+        <div class="card-tags"><span class="tag">역할탭</span><span class="tag">체어배정</span><span class="tag">콜백</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="sec-title"><span class="type-badge lo">🟢 lookup</span> 작은 대시보드 — 클릭해서 확인 (5개)</div>
+  <div class="grid">
+    <div class="card" onclick="openModal('모닝 — 작은 대시보드 (4탭)','pages/morning-small.html')">
+      <div class="card-preview">📊</div>
+      <div class="card-info">
+        <div class="card-name">morning-small</div>
+        <div class="card-desc">접수현황·체어·발신리콜·청구 4탭 · /home 기본값</div>
+        <div class="card-tags"><span class="tag">4탭</span><span class="tag">접수대기</span><span class="tag">빈체어</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('체어 브리핑 (실시간)','pages/chair-briefing-live.html')">
+      <div class="card-preview">🦷</div>
+      <div class="card-info">
+        <div class="card-name">chair-briefing-live</div>
+        <div class="card-desc">체어별 다음 환자 정보 · 실시간</div>
+        <div class="card-tags"><span class="tag">체어</span><span class="tag">브리핑</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('체어 브리핑 규칙','pages/chair-briefing-rules.html')">
+      <div class="card-preview">📝</div>
+      <div class="card-info">
+        <div class="card-name">chair-briefing-rules</div>
+        <div class="card-desc">브리핑 표시 규칙 설정</div>
+        <div class="card-tags"><span class="tag">설정</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('AI 상담 기록','pages/ai-consult-record.html')">
+      <div class="card-preview">🤖</div>
+      <div class="card-info">
+        <div class="card-name">ai-consult-record</div>
+        <div class="card-desc">AI 상담 이력 조회</div>
+        <div class="card-tags"><span class="tag">AI</span><span class="tag">상담</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('동의서 안내','pages/consent-manual.html')">
+      <div class="card-preview">📄</div>
+      <div class="card-info">
+        <div class="card-name">consent-manual</div>
+        <div class="card-desc">동의서 작성 안내 화면</div>
+        <div class="card-tags"><span class="tag">동의서</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="sec-title"><span class="type-badge ov">🟡 overview</span> 큰 대시보드 — 경영·현황 (8개)</div>
+  <div class="grid">
+    <div class="card" onclick="openModal('모닝 — 큰 대시보드','pages/morning-large.html')">
+      <div class="card-preview">🏥</div>
+      <div class="card-info">
+        <div class="card-name">morning-large</div>
+        <div class="card-desc">체어 그리드·Analytic·마케팅·교정·경영리포트</div>
+        <div class="card-tags"><span class="tag">경영</span><span class="tag">체어그리드</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('라운지 현황','pages/desk-lounge.html')">
+      <div class="card-preview">🛋️</div>
+      <div class="card-info">
+        <div class="card-name">desk-lounge</div>
+        <div class="card-desc">라운지 맵 · 체어 배치 시각화</div>
+        <div class="card-tags"><span class="tag">라운지</span><span class="tag">맵</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('운영 현황','pages/desk-op.html')">
+      <div class="card-preview">⚙️</div>
+      <div class="card-info">
+        <div class="card-name">desk-op</div>
+        <div class="card-desc">운영 대시보드</div>
+        <div class="card-tags"><span class="tag">운영</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('근태','pages/desk-attendance.html')">
+      <div class="card-preview">🕐</div>
+      <div class="card-info">
+        <div class="card-name">desk-attendance</div>
+        <div class="card-desc">직원 근태 현황</div>
+        <div class="card-tags"><span class="tag">근태</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="sec-title"><span class="type-badge ex">⚪ 접수 키오스크</span> 별도 단말 (3개)</div>
+  <div class="grid">
+    <div class="card" onclick="openModal('키오스크 — 환자 화면','pages/kiosk-patient.html')">
+      <div class="card-preview">🖥️</div>
+      <div class="card-info">
+        <div class="card-name">kiosk-patient</div>
+        <div class="card-desc">환자가 보는 접수 키오스크</div>
+        <div class="card-tags"><span class="tag">키오스크</span><span class="tag">환자</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('키오스크 — 직원 화면','pages/desk-kiosk.html')">
+      <div class="card-preview">📱</div>
+      <div class="card-info">
+        <div class="card-name">desk-kiosk</div>
+        <div class="card-desc">직원이 보는 키오스크 관리</div>
+        <div class="card-tags"><span class="tag">키오스크</span><span class="tag">직원</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('키오스크 모니터','pages/desk-kiosk-monitor.html')">
+      <div class="card-preview">📺</div>
+      <div class="card-info">
+        <div class="card-name">desk-kiosk-monitor</div>
+        <div class="card-desc">키오스크 상태 모니터링</div>
+        <div class="card-tags"><span class="tag">모니터링</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="sec-title">📱 폰 화면 / 알림톡 (준비 중)</div>
+  <div class="grid">
+    <div class="card soon">
+      <div class="card-preview">📱</div>
+      <div class="card-info">
+        <div class="card-name">모바일 앱 화면</div>
+        <div class="card-desc">4prism-v2-mobile Flutter 앱 — 근태·톡·업무폰 통합</div>
+        <div class="card-tags"><span class="tag">준비중</span><span class="tag">Flutter</span></div>
+      </div>
+    </div>
+    <div class="card soon">
+      <div class="card-preview">💬</div>
+      <div class="card-info">
+        <div class="card-name">알림톡 발송 화면</div>
+        <div class="card-desc">카카오톡 알림톡 발송 흐름 (#28 mini-work)</div>
+        <div class="card-tags"><span class="tag">준비중</span><span class="tag">카카오</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="sec-title">🎨 Vibe 사이트 (5개)</div>
+  <div class="grid">
+    <div class="card" onclick="openModal('청구 리포트','vibe/sites/claim-report-20261014/index.html')">
+      <div class="card-preview">📑</div>
+      <div class="card-info">
+        <div class="card-name">claim-report</div>
+        <div class="card-desc">청구 현황 리포트 (2026-10-14)</div>
+        <div class="card-tags"><span class="tag">청구</span><span class="tag">vibe</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('접수 접수','vibe/sites/clinic-reception/index.html')">
+      <div class="card-preview">🏥</div>
+      <div class="card-info">
+        <div class="card-name">clinic-reception</div>
+        <div class="card-desc">클리닉 접수 화면</div>
+        <div class="card-tags"><span class="tag">접수</span><span class="tag">vibe</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('데스크 홈','vibe/sites/desk-home/index.html')">
+      <div class="card-preview">🏠</div>
+      <div class="card-info">
+        <div class="card-name">desk-home</div>
+        <div class="card-desc">데스크 홈 화면</div>
+        <div class="card-tags"><span class="tag">홈</span><span class="tag">vibe</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('접수 intake 2','vibe/sites/reception-intake-2/index.html')">
+      <div class="card-preview">📋</div>
+      <div class="card-info">
+        <div class="card-name">reception-intake-2</div>
+        <div class="card-desc">접수 intake 버전 2</div>
+        <div class="card-tags"><span class="tag">접수</span><span class="tag">vibe</span></div>
+      </div>
+    </div>
+    <div class="card" onclick="openModal('오늘 접수','vibe/sites/today-intake/index.html')">
+      <div class="card-preview">📅</div>
+      <div class="card-info">
+        <div class="card-name">today-intake</div>
+        <div class="card-desc">오늘 접수 현황</div>
+        <div class="card-tags"><span class="tag">오늘</span><span class="tag">vibe</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title" id="modalTitle"></span>
+      <button class="modal-close" onclick="closeModalBtn()">✕</button>
+    </div>
+    <iframe class="modal-iframe" id="modalFrame" src="" title="화면 미리보기"></iframe>
+    <div class="modal-url" id="modalUrl"></div>
+  </div>
+</div>
+<script>
+'use strict'
+const BASE = '/view/v1/'
+
+function openModal(title, path) {
+  document.getElementById('modalTitle').textContent = title
+  document.getElementById('modalFrame').src = BASE + path
+  document.getElementById('modalUrl').textContent = BASE + path
+  document.getElementById('modalOverlay').classList.add('open')
+}
+function closeModal(e) {
+  if (e.target === document.getElementById('modalOverlay')) closeModalBtn()
+}
+function closeModalBtn() {
+  document.getElementById('modalOverlay').classList.remove('open')
+  document.getElementById('modalFrame').src = ''
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalBtn() })
+</script>

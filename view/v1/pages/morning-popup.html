@@ -1,0 +1,193 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>모닝 — 팝업</title>
+<style>
+:root{
+  --ink:#111827;--sub:#4b5563;--muted:#9ca3af;--line:#e5e7eb;--soft:#f9fafb;
+  --blue:#2a85ff;--blue-soft:#eff6ff;--red:#b91c1c;--red-soft:#fef2f2;
+  --amber:#b45309;--amber-soft:#fffbeb;--green:#047857;--green-soft:#ecfdf5;
+  --font:"Apple SD Gothic Neo",Pretendard,-apple-system,"Noto Sans KR",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:transparent;font:14px/1.5 var(--font);color:var(--ink)}
+.wrap{position:fixed;top:20px;right:20px;width:340px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+.card{background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.12);border:1px solid var(--line);animation:slide-in .18s ease-out}
+@keyframes slide-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.card.call{border-left:4px solid var(--blue);background:var(--blue-soft)}
+.card.countdown{border-left:4px solid var(--amber);background:var(--amber-soft)}
+.card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.badge{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700}
+.badge-call{background:#bfdbfe;color:#1d4ed8}
+.badge-countdown{background:#fde68a;color:#92400e}
+.card-title{font-size:16px;font-weight:800;flex:1}
+.card-sub{font-size:13px;color:var(--sub);margin-bottom:4px}
+.card-detail{font-size:12px;color:var(--muted)}
+.timer{font-size:28px;font-weight:900;color:var(--amber);text-align:center;padding:8px 0;letter-spacing:-1px}
+.timer.urgent{color:var(--red)}
+.card-action{margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,.07);display:flex;gap:6px}
+.btn{flex:1;border:none;border-radius:9px;padding:8px 10px;font:600 12.5px var(--font);cursor:pointer}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-primary:hover{background:#374151}
+.btn-sec{background:var(--soft);color:var(--sub);border:1px solid var(--line)}
+.btn-sec:hover{background:#eef0f3}
+.btn-cancel{background:#fef2f2;color:var(--red);border:1px solid #fecaca}
+.btn-cancel:hover{background:#fee2e2}
+.empty{background:#fff;border-radius:16px;padding:20px;text-align:center;color:var(--muted);font-size:12px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+</style>
+<body>
+<div class="wrap" id="app"><div class="empty">대기 중…</div></div>
+<script>
+'use strict'
+
+/**
+ * @typedef {'incoming_call'|'auto_send_countdown'} InterruptConditionKind
+ * @typedef {{ kind: 'incoming_call', callerNumber: string, patientName: string|null, patientId: number|null }} IncomingCallCondition
+ * @typedef {{ kind: 'auto_send_countdown', remainingSecs: number, targetDesc: string, sendId: string }} CountdownCondition
+ * @typedef {IncomingCallCondition|CountdownCondition} InterruptCondition
+ */
+
+/** @type {Map<string, ReturnType<typeof setInterval>>} */
+const timers = new Map()
+
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const callDismissTimers = new Map()
+
+/** @param {string} s */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+}
+
+/** @param {IncomingCallCondition} c */
+function renderCallCard(c) {
+  return `<div class="card call" id="card-call-${esc(c.callerNumber.replace(/\D/g,''))}">
+    <div class="card-head">
+      <span class="badge badge-call">📞 수신전화</span>
+    </div>
+    <div class="card-title">${c.patientName ? esc(c.patientName) + ' 님' : '알 수 없는 번호'}</div>
+    <div class="card-sub">${esc(c.callerNumber)}</div>
+    ${c.patientId ? `<div class="card-detail">환자 ID #${c.patientId}</div>` : '<div class="card-detail">신규 환자 또는 미등록 번호</div>'}
+    <div class="card-action">
+      <button class="btn btn-primary" onclick="dismissCall(${JSON.stringify(c.callerNumber)})">확인했어요</button>
+      <button class="btn btn-sec" onclick="dismissCall(${JSON.stringify(c.callerNumber)})">닫기</button>
+    </div>
+  </div>`
+}
+
+/** @param {CountdownCondition} c */
+function renderCountdownCard(c) {
+  const cardId = `card-countdown-${esc(c.sendId)}`
+  const timerId = `timer-${esc(c.sendId)}`
+  return `<div class="card countdown" id="${cardId}">
+    <div class="card-head">
+      <span class="badge badge-countdown">⏱ 자동발송</span>
+    </div>
+    <div class="card-title">${esc(c.targetDesc)}</div>
+    <div class="timer" id="${timerId}">${c.remainingSecs}초</div>
+    <div class="card-sub" style="text-align:center">취소하지 않으면 자동 발송됩니다</div>
+    <div class="card-action">
+      <button class="btn btn-cancel" onclick="cancelSend(${JSON.stringify(c.sendId)})">취소</button>
+    </div>
+  </div>`
+}
+
+/** @param {string} sendId @param {number} secs */
+function startCountdownTimer(sendId, secs) {
+  const timerId = `timer-${sendId}`
+  let remaining = secs
+  const iv = setInterval(() => {
+    remaining -= 1
+    const el = document.getElementById(timerId)
+    if (!el) { clearInterval(iv); timers.delete(sendId); return }
+    el.textContent = `${remaining}초`
+    if (remaining <= 5) el.classList.add('urgent')
+    if (remaining <= 0) {
+      clearInterval(iv)
+      timers.delete(sendId)
+      document.getElementById(`card-countdown-${sendId}`)?.remove()
+      checkEmpty()
+    }
+  }, 1000)
+  timers.set(sendId, iv)
+}
+
+/** @param {string} callerNumber */
+function dismissCall(callerNumber) {
+  const key = callerNumber.replace(/\D/g,'')
+  const id = `card-call-${key}`
+  const existing = callDismissTimers.get(key)
+  if (existing) { clearTimeout(existing); callDismissTimers.delete(key) }
+  const el = document.getElementById(id)
+  if (el) { el.style.opacity = '0.3'; setTimeout(() => { el.remove(); checkEmpty() }, 200) }
+}
+
+/** @param {string} callerNumber */
+function scheduleCallAutoDismiss(callerNumber) {
+  const key = callerNumber.replace(/\D/g,'')
+  const existing = callDismissTimers.get(key)
+  if (existing) return
+  const t = setTimeout(() => { dismissCall(callerNumber) }, 60000)
+  callDismissTimers.set(key, t)
+}
+
+/** @param {string} sendId */
+function cancelSend(sendId) {
+  fetch('/api-v1/send-queue/' + encodeURIComponent(sendId) + '/cancel', {method:'POST'}).catch(() => {})
+  const iv = timers.get(sendId)
+  if (iv) { clearInterval(iv); timers.delete(sendId) }
+  const el = document.getElementById(`card-countdown-${sendId}`)
+  if (el) { el.style.opacity = '0.3'; setTimeout(() => { el.remove(); checkEmpty() }, 200) }
+}
+
+function checkEmpty() {
+  const app = document.getElementById('app')
+  if (!app) return
+  const cards = app.querySelectorAll('.card')
+  if (!cards.length) app.innerHTML = '<div class="empty">대기 중…</div>'
+}
+
+/** @returns {InterruptCondition[]} */
+function mockConditions() {
+  return [
+    { kind: 'incoming_call', callerNumber: '010-1234-5678', patientName: '김영희', patientId: 4201 },
+  ]
+}
+
+/** @param {InterruptCondition[]} conditions */
+function render(conditions) {
+  const app = document.getElementById('app')
+  if (!conditions.length) { app.innerHTML = '<div class="empty">대기 중…</div>'; return }
+
+  const html = conditions.map(c => {
+    if (c.kind === 'incoming_call') return renderCallCard(c)
+    if (c.kind === 'auto_send_countdown') return renderCountdownCard(c)
+    return ''
+  }).join('')
+  app.innerHTML = html
+
+  conditions.forEach(c => {
+    if (c.kind === 'auto_send_countdown') startCountdownTimer(c.sendId, c.remainingSecs)
+    if (c.kind === 'incoming_call') scheduleCallAutoDismiss(c.callerNumber)
+  })
+}
+
+async function loadAndRender() {
+  /** @type {InterruptCondition[]} */
+  let conditions = []
+  try {
+    const r = await fetch('/api-v1/interrupt-conditions', {headers:{accept:'application/json'}, cache:'no-store'})
+    if (r.ok) {
+      const data = await r.json()
+      conditions = data.conditions ?? []
+    } else {
+      conditions = mockConditions()
+    }
+  } catch(_) {
+    conditions = mockConditions()
+  }
+  render(conditions)
+}
+
+loadAndRender()
+setInterval(() => { if (!document.hidden) loadAndRender() }, 30000)
+</script>

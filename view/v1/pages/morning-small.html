@@ -1,0 +1,222 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>모닝 — 작은 대시보드</title>
+<style>
+:root{
+  --ink:#111827;--sub:#4b5563;--muted:#9ca3af;--line:#e5e7eb;--soft:#f9fafb;
+  --blue:#2a85ff;--blue-soft:#eff6ff;--red:#b91c1c;--red-soft:#fef2f2;
+  --amber:#b45309;--amber-soft:#fffbeb;--green:#047857;--green-soft:#ecfdf5;
+  --font:"Apple SD Gothic Neo",Pretendard,-apple-system,"Noto Sans KR",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#f3f4f6;font:13px/1.5 var(--font);color:var(--ink);min-width:360px}
+.wrap{padding:10px;display:flex;flex-direction:column;gap:8px}
+.tab-bar{display:flex;gap:2px;background:#fff;border-radius:11px;border:1px solid var(--line);padding:3px}
+.tab-btn{flex:1;border:none;border-radius:8px;padding:6px 4px;font:600 11.5px var(--font);cursor:pointer;background:transparent;color:var(--muted);white-space:nowrap}
+.tab-btn.active{background:var(--ink);color:#fff}
+.kpi-row{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.kpi{background:#fff;border-radius:11px;border:1px solid var(--line);padding:12px 14px}
+.kpi-num{font-size:26px;font-weight:900;line-height:1;letter-spacing:-1px;color:var(--ink)}
+.kpi-label{font-size:11.5px;color:var(--muted);margin-top:3px}
+.kpi.green .kpi-num{color:var(--green)}
+.kpi.amber .kpi-num{color:var(--amber)}
+.kpi.red .kpi-num{color:var(--red)}
+.kpi.blue .kpi-num{color:var(--blue)}
+.panel{background:#fff;border-radius:11px;border:1px solid var(--line);overflow:hidden}
+.panel-head{padding:8px 12px;font-size:12px;font-weight:800;color:var(--sub);border-bottom:1px solid var(--line);background:var(--soft);display:flex;align-items:center;justify-content:space-between}
+.panel-refresh{font-size:11px;font-weight:400;color:var(--muted);cursor:pointer;padding:2px 6px;border:1px solid var(--line);border-radius:5px;background:#fff}
+.panel-refresh:hover{background:var(--soft)}
+.row{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot-green{background:#10b981}
+.dot-amber{background:#f59e0b}
+.dot-red{background:#ef4444}
+.dot-muted{background:#d1d5db}
+.row-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12.5px;font-weight:600}
+.row-desc{font-size:11.5px;color:var(--sub);white-space:nowrap}
+.row-badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap}
+.badge-green{background:var(--green-soft);color:var(--green)}
+.badge-amber{background:var(--amber-soft);color:var(--amber)}
+.badge-red{background:var(--red-soft);color:var(--red)}
+.badge-blue{background:var(--blue-soft);color:#1d4ed8}
+.badge-muted{background:var(--soft);color:var(--muted)}
+.empty-row{padding:14px;text-align:center;color:var(--muted);font-size:12px}
+.time-note{font-size:11px;color:var(--muted);text-align:right;padding:2px 2px}
+</style>
+<body>
+<div class="wrap">
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="setTab('today')">오늘현황</button>
+    <button class="tab-btn" onclick="setTab('chair')">접수·체어</button>
+    <button class="tab-btn" onclick="setTab('recall')">발신·리콜</button>
+    <button class="tab-btn" onclick="setTab('claim')">청구</button>
+  </div>
+  <div id="tabContent"></div>
+  <div class="time-note" id="timeNote"></div>
+</div>
+<script>
+'use strict'
+
+/**
+ * @typedef {{ total: number, done: number, upcoming: number }} TodaySummary
+ * @typedef {{ chairId: number, chairName: string, occupied: boolean, idleMinutes: number, receptionPending: boolean, patientName: string|null, treatmentLine: string|null }} Chair
+ * @typedef {{ recallId: number, patientName: string, daysOverdue: number, phone: string, status: 'pending'|'done' }} RecallItem
+ * @typedef {{ claimId: number, patientName: string, amount: number, status: 'pending'|'reviewed'|'rejected' }} ClaimItem
+ */
+
+/** @type {'today'|'chair'|'recall'|'claim'} */
+let currentTab = 'today'
+
+/** @param {string} s */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+}
+
+function mockData() {
+  return {
+    today: { total: 24, done: 11, upcoming: 13 },
+    chairs: [
+      {chairId:1,chairName:'1번',occupied:true,idleMinutes:5,receptionPending:false,patientName:'홍길동',treatmentLine:'임플란트 1단계'},
+      {chairId:2,chairName:'2번',occupied:true,idleMinutes:3,receptionPending:true,patientName:'김민수',treatmentLine:'크라운'},
+      {chairId:3,chairName:'3번',occupied:false,idleMinutes:0,receptionPending:false,patientName:null,treatmentLine:null},
+      {chairId:4,chairName:'4번',occupied:true,idleMinutes:22,receptionPending:false,patientName:'이지은',treatmentLine:'스케일링'},
+      {chairId:5,chairName:'5번',occupied:false,idleMinutes:0,receptionPending:false,patientName:null,treatmentLine:null},
+    ],
+    recalls: [
+      {recallId:1,patientName:'박서준',daysOverdue:3,phone:'010-9876-5432',status:'pending'},
+      {recallId:2,patientName:'최민지',daysOverdue:1,phone:'010-5555-1234',status:'done'},
+      {recallId:3,patientName:'강준호',daysOverdue:7,phone:'010-1111-2222',status:'pending'},
+    ],
+    claims: [
+      {claimId:1,patientName:'홍길동',amount:85000,status:'pending'},
+      {claimId:2,patientName:'김민수',amount:120000,status:'reviewed'},
+      {claimId:3,patientName:'이지은',amount:35000,status:'rejected'},
+    ],
+  }
+}
+
+/** @type {ReturnType<typeof mockData>} */
+let data = mockData()
+
+/** @param {'today'|'chair'|'recall'|'claim'} tab */
+function setTab(tab) {
+  currentTab = tab
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', ['today','chair','recall','claim'][i] === tab)
+  })
+  renderTab()
+}
+
+function renderToday() {
+  const d = data.today
+  const remaining = d.total - d.done
+  const emptyChairs = data.chairs.filter(c => !c.occupied).length
+  const pendingReception = data.chairs.filter(c => c.receptionPending).length
+  return `<div class="kpi-row">
+    <div class="kpi amber"><div class="kpi-num">${pendingReception}</div><div class="kpi-label">접수 대기</div></div>
+    <div class="kpi${emptyChairs > 0 ? '' : ' red'}"><div class="kpi-num">${emptyChairs}</div><div class="kpi-label">빈 체어</div></div>
+    <div class="kpi blue"><div class="kpi-num">${remaining}</div><div class="kpi-label">남은 예약</div></div>
+    <div class="kpi green"><div class="kpi-num">${d.done}</div><div class="kpi-label">완료</div></div>
+  </div>`
+}
+
+function renderChair() {
+  const pending = data.chairs.filter(c => c.receptionPending)
+  const rows = data.chairs.map(c => {
+    const cls = c.occupied && c.idleMinutes > 15 ? 'dot-red' : c.receptionPending ? 'dot-amber' : c.occupied ? 'dot-green' : 'dot-muted'
+    const badge = c.occupied && c.idleMinutes > 15
+      ? `<span class="row-badge badge-red">비상</span>`
+      : c.receptionPending
+        ? `<span class="row-badge badge-amber">접수</span>`
+        : c.occupied
+          ? `<span class="row-badge badge-green">진료중</span>`
+          : `<span class="row-badge badge-muted">비어있음</span>`
+    return `<div class="row">
+      <span class="dot ${cls}"></span>
+      <span class="row-name">${esc(c.chairName)}${c.patientName ? ' — ' + esc(c.patientName) : ''}</span>
+      ${badge}
+    </div>`
+  }).join('')
+  const pendingNote = pending.length ? `<div class="kpi-row" style="margin-bottom:4px"><div class="kpi amber"><div class="kpi-num">${pending.length}</div><div class="kpi-label">접수 대기</div></div></div>` : ''
+  return pendingNote + `<div class="panel"><div class="panel-head">체어 현황</div>${rows}</div>`
+}
+
+function renderRecall() {
+  const pending = data.recalls.filter(r => r.status === 'pending')
+  const rows = data.recalls.map(r => {
+    const badge = r.status === 'done'
+      ? `<span class="row-badge badge-green">완료</span>`
+      : r.daysOverdue >= 3
+        ? `<span class="row-badge badge-red">${r.daysOverdue}일 경과</span>`
+        : `<span class="row-badge badge-amber">${r.daysOverdue}일 경과</span>`
+    return `<div class="row">
+      <span class="dot ${r.status === 'done' ? 'dot-green' : r.daysOverdue >= 3 ? 'dot-red' : 'dot-amber'}"></span>
+      <span class="row-name">${esc(r.patientName)} 님</span>
+      ${badge}
+    </div>`
+  }).join('')
+  return `<div class="kpi-row" style="margin-bottom:4px">
+    <div class="kpi red"><div class="kpi-num">${pending.length}</div><div class="kpi-label">미완료 리콜</div></div>
+    <div class="kpi green"><div class="kpi-num">${data.recalls.length - pending.length}</div><div class="kpi-label">완료</div></div>
+  </div>
+  <div class="panel"><div class="panel-head">오늘 발신 리콜</div>${rows}</div>`
+}
+
+function renderClaim() {
+  const pending = data.claims.filter(c => c.status === 'pending')
+  const rows = data.claims.map(c => {
+    const badge = c.status === 'pending'
+      ? `<span class="row-badge badge-amber">검토 대기</span>`
+      : c.status === 'rejected'
+        ? `<span class="row-badge badge-red">반려</span>`
+        : `<span class="row-badge badge-green">검토 완료</span>`
+    return `<div class="row">
+      <span class="dot ${c.status === 'pending' ? 'dot-amber' : c.status === 'rejected' ? 'dot-red' : 'dot-green'}"></span>
+      <span class="row-name">${esc(c.patientName)} 님</span>
+      <span class="row-desc">${c.amount.toLocaleString()}원</span>
+      ${badge}
+    </div>`
+  }).join('')
+  return `<div class="kpi-row" style="margin-bottom:4px">
+    <div class="kpi amber"><div class="kpi-num">${pending.length}</div><div class="kpi-label">검토 대기</div></div>
+    <div class="kpi"><div class="kpi-num">${data.claims.length}</div><div class="kpi-label">전체</div></div>
+  </div>
+  <div class="panel"><div class="panel-head">보험청구 검토</div>${rows || '<div class="empty-row">청구 항목 없음</div>'}</div>`
+}
+
+function renderTab() {
+  const content = document.getElementById('tabContent')
+  if (!content) return
+  if (currentTab === 'today') content.innerHTML = renderToday()
+  else if (currentTab === 'chair') content.innerHTML = renderChair()
+  else if (currentTab === 'recall') content.innerHTML = renderRecall()
+  else content.innerHTML = renderClaim()
+
+  const timeNote = document.getElementById('timeNote')
+  if (timeNote) timeNote.textContent = new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}) + ' 기준'
+}
+
+async function fetchData() {
+  try {
+    const [chairR, recallR, claimR] = await Promise.all([
+      fetch('/api-v1/chair-briefings', {headers:{accept:'application/json'}, cache:'no-store'}),
+      fetch('/api-v1/recall-queue-today', {headers:{accept:'application/json'}, cache:'no-store'}),
+      fetch('/api-v1/claim-triage-queue', {headers:{accept:'application/json'}, cache:'no-store'}),
+    ])
+    if (chairR.ok) {
+      const d = await chairR.json()
+      if (d.chairs) data.chairs = d.chairs
+      if (d.todaySummary) data.today = d.todaySummary
+    }
+    if (recallR.ok) { const d = await recallR.json(); if (d.recalls) data.recalls = d.recalls }
+    if (claimR.ok) { const d = await claimR.json(); if (d.claims) data.claims = d.claims }
+  } catch(_) {}
+  renderTab()
+}
+
+renderTab()
+setInterval(() => { if (!document.hidden) fetchData() }, 30000)
+fetchData()
+</script>

@@ -1,0 +1,678 @@
+<!--
+  체어 브리핑 — 진료 조건 → 모니터 화면 (기본표 · 설정 · 초기화) · 2026-10-15
+
+  사용자 지시: 「체어 브리핑 설정 화면에 환자 진료를 어떤 조건으로 구분하고 그 진료에 대해
+  모니터에 어떤 스크린 정보를 표기하는지 표기 기본 정보를 표기하시오. 그리고 표기한 내용을
+  설정할 수 있는 기능과 초기화 할 수 있는 버튼도 추가하시오.」
+
+  설계: docs/develop/체어브리핑/03_기획_진료조건별_모니터화면.md
+
+  · 셸이 `#/clinic/chair-briefing-settings` 맨 위에 iframe 으로 끼운다(기존 카드 리스트는 그 아래 그대로).
+  · 높이는 이 문서가 부모에게 알린다(postMessage {type:'chair-rules-height'}).
+  🔴 **판정은 서버가 한다** — 시험 칸·오늘 예약 확인은 예약 내용을 `/api-v1/chair-briefing/match` 로
+     보내고 결과만 그린다(판정기를 JS 로 또 만들지 않는다 — CLAUDE.md §3-2d).
+  🔴 (2026-10-21 사용자 지시) 이 화면은 **개발데이터(api-v1) 전용**이다 — 템플릿·카드도 api-v0 를 부르지 않는다.
+     api-v1 레인(`/api-v1/data/api/chair-briefing-cards/*`) 하나로 받는다 — 서버가 mediqr 고정값 응답과 앱 번들 기본 카드를
+     합쳐 내린다(server/mediqr_fixed.rs). 예전엔 api-v0 를 불러, 중계가 실패하면 「api-v0 를 못 읽었다(HTTP 400)」가 떴다.
+  (옛 설명) 템플릿·카드는 **api-v0 실데이터**(`/api-v0/api/chair-briefing-cards/*`)에서 읽는다. 못 읽으면
+     「못 읽었다」고 말한다 — 카드 수를 0 으로 그리지 않는다(0장과 조회 실패는 다르다).
+  🔴 mediqr 에는 아무것도 쓰지 않는다. 저장은 이 서버 로컬 설정뿐이다.
+  🔴 오늘 예약 확인에 **환자 이름을 그리지 않는다** — 시각과 예약 내용(정규화본)만.
+  🔴 CDN 없음 — 병원 내부망은 인터넷이 없을 수 있다.
+-->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>진료 조건 → 체어 모니터 화면</title>
+<style>
+  :root{
+    --bg:#fff; --ink:#111827; --sub:#4b5563; --muted:#9ca3af; --line:#e5e7eb; --soft:#f9fafb;
+    --blue:#2a85ff; --blue-soft:#eff6ff; --green:#047857; --green-soft:#ecfdf5;
+    --amber:#b45309; --amber-soft:#fffbeb; --red:#b91c1c; --red-soft:#fef2f2; --violet:#6d28d9; --violet-soft:#f5f3ff;
+    --font:Pretendard,-apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:transparent;color:var(--ink);font:14px/1.5 var(--font)}
+  body{padding:0 0 8px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .between{justify-content:space-between}
+  h2{margin:0;font-size:18px;font-weight:800}
+  h3{margin:0;font-size:15px;font-weight:800}
+  .desc{color:var(--sub);font-size:13px;margin-top:4px}
+  .tiny{font-size:12px;color:var(--muted)}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:7px 12px;font:600 13px var(--font);color:var(--ink);cursor:pointer;white-space:nowrap;flex:none}
+  .btn:hover{background:var(--soft)}
+  .btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+  .btn.primary:hover{background:#000}
+  .btn.danger{color:var(--red);border-color:#fecaca}
+  .btn.danger:hover{background:var(--red-soft)}
+  .btn.sm{padding:4px 9px;font-size:12px;border-radius:8px}
+  /* ▶ 체어 모니터 미리보기 — 「브리핑 템플릿 기본 카드 설정」 탭의 재생 아이콘과 같은 모양(원형·회색 → 파랑) */
+  .playbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;border-radius:999px;background:none;color:#94a3b8;cursor:pointer;vertical-align:middle;transition:.15s}
+  .playbtn:hover{background:#eaf3ff;color:#2a85ff}
+  .btn:disabled{opacity:.4;cursor:default}
+  .badge{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-size:11.5px;font-weight:700;background:#f3f4f6;color:#4b5563;white-space:nowrap}
+  .b-blue{background:var(--blue-soft);color:#1d4ed8}
+  .b-green{background:var(--green-soft);color:var(--green)}
+  .b-amber{background:var(--amber-soft);color:var(--amber)}
+  .b-red{background:var(--red-soft);color:var(--red)}
+  .b-violet{background:var(--violet-soft);color:var(--violet)}
+  .chip{display:inline-block;border:1px solid var(--line);background:var(--soft);border-radius:6px;padding:0 6px;margin:1px 2px 1px 0;font-size:12px;color:#374151;font-family:ui-monospace,Menlo,monospace}
+  .sec{margin-top:16px}
+  .note{background:var(--soft);border:1px dashed var(--line);border-radius:12px;padding:10px 12px;font-size:12.5px;color:var(--sub)}
+  .warn{background:var(--amber-soft);border:1px solid #fde68a;border-radius:12px;padding:10px 12px;font-size:13px;color:var(--amber)}
+  .err{background:var(--red-soft);border:1px solid #fecaca;border-radius:12px;padding:10px 12px;font-size:13px;color:var(--red)}
+  details>summary{cursor:pointer;font-weight:700}
+  ol.steps{margin:8px 0 0 18px;padding:0;font-size:13px;color:var(--sub)}
+  ol.steps li{margin:2px 0}
+  input[type=text],input[type=number],textarea,select{font:13px var(--font);border:1px solid var(--line);border-radius:8px;padding:7px 9px;color:var(--ink);background:#fff;width:100%}
+  textarea{resize:vertical}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:12px;color:var(--muted);font-weight:700;text-align:left;padding:8px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 8px;border-top:1px solid #f3f4f6;vertical-align:top;font-size:13px}
+  tr.rule{cursor:pointer}
+  tr.rule:hover td{background:#fcfcfd}
+  tr.off td{color:var(--muted)}
+  tr.off .name{text-decoration:line-through}
+  tr.fam td{background:var(--soft);font-weight:800;font-size:12.5px;color:#374151;padding:6px 8px;cursor:default}
+  tr.detail td{background:#fbfdff;border-top:0}
+  .name{font-weight:700}
+  .id{font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+  .tpl{font-weight:700}
+  .tplkey{font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+  .cards{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .cardt{border:1px solid #dbeafe;background:#fff;border-radius:8px;padding:3px 8px;font-size:12px;color:#1e3a8a}
+  .cardt i{font-style:normal;color:var(--muted);margin-right:4px}
+  .cardt.est{border-style:dashed;color:#334155;border-color:#cbd5e1}
+  .cardt.hid{border-color:#e5e7eb;background:#f9fafb;color:#9ca3af}
+  .switch{position:relative;width:34px;height:20px;border-radius:999px;background:#d1d5db;border:0;cursor:pointer;flex:none}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+  .switch.on{background:var(--blue)}
+  .switch.on::after{left:16px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .kpi{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .kpi>div{border:1px solid var(--line);border-radius:12px;padding:8px 12px;min-width:110px}
+  .kpi b{display:block;font-size:18px}
+  .bar{height:8px;border-radius:999px;background:#f3f4f6;overflow:hidden;min-width:80px}
+  .bar>i{display:block;height:100%;background:var(--blue)}
+  .modal-bg{position:absolute;left:0;right:0;top:0;background:rgba(17,24,39,.35);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:10}
+  .modal{background:#fff;border-radius:16px;width:min(680px,100%);padding:20px 22px;box-shadow:0 20px 40px rgba(0,0,0,.18)}
+  .field{margin-top:12px}
+  .field label{display:block;font-size:12.5px;font-weight:700;color:#374151;margin-bottom:4px}
+  .seclist{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .seclist label{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-weight:600;font-size:12.5px;cursor:pointer}
+  .toast{position:absolute;right:16px;top:0;background:#111827;color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+  .toast.on{opacity:1}
+  .judge{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}
+  .tbl-scroll{overflow-x:auto}
+  .hidden{display:none!important}
+</style>
+
+<div class="card" id="root">
+  <div class="row between">
+    <div>
+      <h2>진료 조건 → 체어 모니터 화면</h2>
+      <div class="desc">예약 내용을 어떤 조건으로 <b>진료</b>로 구분하고, 그 진료일 때 체어 모니터에 <b>어떤 화면(템플릿 카드)</b>을 띄우는지 정하는 기본표입니다.</div>
+      <div class="tiny" id="srcLine">불러오는 중…</div>
+    </div>
+    <div class="row">
+      <button class="btn" id="btnAdd" type="button">+ 규칙 추가</button>
+      <button class="btn danger" id="btnResetAll" type="button">전체 초기화</button>
+    </div>
+  </div>
+  <div class="row sec" id="summary"></div>
+  <div id="v0warn" class="warn sec hidden"></div>
+  <div id="loadErr" class="err sec hidden"></div>
+
+  <details class="sec note" id="howto">
+    <summary>진료를 구분하는 순서 (운영본 진료안내 변환표와 같은 순서)</summary>
+    <ol class="steps">
+      <li><b>정리</b> — 예약 내용에서 담당의·스탭 꼬리(<span class="chip">/dr.조/담비</span>), <span class="chip">[도착]</span> 같은 머리표, 치아번호(<span class="chip">#36</span>)를 걷어냅니다. <span class="chip">#47i</span>의 <b>i</b>는 임플란트 신호라 남깁니다.</li>
+      <li><b>조건(키워드) 찾기</b> — 긴 키워드부터 찾고, 한 번 잡힌 글자는 다시 쓰지 않습니다(<span class="chip">perio</span>가 <span class="chip">pe</span>에 먹히지 않게). 영문 키워드는 앞뒤가 영문·숫자면 건너뜁니다(<span class="chip">imp</span> ≠ <span class="chip">implant</span>).</li>
+      <li><b>못 찾으면</b> — 지어내지 않고 사유로 나눕니다: 호소형(아파요…) · 조건부(원하시면·여부…) · 미확인 · 빈칸 → 아래 「판정 실패」 칸의 화면.</li>
+      <li><b>임플란트 문맥</b>(임플·impl·isq·scrp·pmma·1op…)이면 크라운 본뜨기·임시치아·최종 장착을 임플란트 쪽으로 바꿉니다.</li>
+      <li><b>제외 술식</b>(러버댐·마취대기·수납·상담·remake…)만 적혀 있으면 미확인으로 봅니다.</li>
+      <li><b>대표 진료</b> = 우선순위가 가장 높은 것(수술·발치 &gt; 신경치료 &gt; 보철·레진 &gt; 교정 &gt; 잇몸 &gt; 검진 &gt; 후처치). 그 진료의 <b>모니터 템플릿</b>이 체어에 뜹니다.</li>
+    </ol>
+  </details>
+
+  <div class="sec grid2">
+    <div class="note" style="border-style:solid;background:#fff">
+      <h3>시험해 보기</h3>
+      <div class="tiny">예약 내용을 넣으면 지금 설정으로 어떻게 구분되는지 보여 줍니다.</div>
+      <div class="row" style="margin-top:8px;flex-wrap:nowrap">
+        <input type="text" id="tryText" placeholder="예) #36 cr prep /dr.김/우림" autocomplete="off">
+        <input type="text" id="tryBirth" placeholder="생년월일(선택) YYYYMMDD" autocomplete="off" style="width:190px" maxlength="10">
+        <button class="btn primary" id="btnTry" type="button">판정</button>
+      </div>
+      <div id="tryOut"></div>
+    </div>
+    <div class="note" style="border-style:solid;background:#fff">
+      <h3>오늘 예약으로 확인</h3>
+      <div class="tiny">덴트웹 오늘 예약 전부를 지금 설정으로 판정해 분포를 봅니다(읽기만 · 환자 이름은 표시하지 않음).</div>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="todayDate" style="width:120px" placeholder="YYYYMMDD">
+        <button class="btn primary" id="btnToday" type="button">확인</button>
+        <button class="btn sm hidden" id="btnTodayList" type="button">목록 보기</button>
+      </div>
+      <div id="todayOut"></div>
+    </div>
+  </div>
+
+  <div class="sec row between">
+    <h3>진료 구분 규칙 <span class="tiny" id="ruleCount"></span></h3>
+    <div class="row">
+      <input type="text" id="q" placeholder="진료·키워드·템플릿 검색" style="width:200px">
+      <select id="flt" style="width:auto">
+        <option value="">전체</option>
+        <option value="changed">변경됨</option>
+        <option value="off">꺼진 규칙</option>
+        <option value="none">템플릿 없음</option>
+        <option value="custom">사용자 규칙</option>
+      </select>
+    </div>
+  </div>
+  <div class="tbl-scroll">
+    <table id="tbl">
+      <thead><tr>
+        <th style="width:46px">사용</th><th>진료</th><th>조건(키워드)</th><th style="width:50px">우선</th>
+        <th>모니터 화면(템플릿)</th><th style="width:60px">카드</th><th style="width:56px">섹션</th><th style="width:70px">상태</th><th style="width:120px"></th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="tiny sec">행을 누르면 그 진료일 때 모니터에 넘어가는 <b>카드 순서</b>와 환자용 한 줄을 볼 수 있습니다.</div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="modalHost"></div>
+
+<script>
+(function(){
+  'use strict'
+
+/* ══ 로그인 토큰 자동 첨부 (2026-10-19) — iframe 독립 문서라 셸 래퍼가 안 닿는다.
+   localStorage['mw_token'] 를 /api 계열 호출에 Bearer 로 붙이고, 401 이면 최상위 창을
+   /login 으로 보낸다(같은 출처만). 상세는 desk-lounge.html 머리말 참조. */
+;(function(){ /* 🔴 앞의 'use strict' 와 붙으면 "'use strict'(function(){…})" 호출로 읽혀 스크립트 전체가 죽는다(2026-10-19 실측) — 세미콜론 필수 */
+  var token=''; try{ token=localStorage.getItem('mw_token')||'' }catch(e){}
+  var orig=window.fetch;
+  function isApi(u){ try{ var x=new URL(u,location.href); return x.origin===location.origin && /^\/(api|api-v0|api-v1|api-v3)\//.test(x.pathname) }catch(e){ return false } }
+  var redir=false;
+  window.fetch=function(input,init){
+    var u=typeof input==='string'?input:(input&&input.url)||'';
+    if(token && isApi(u)){ init=init||{}; var h=new Headers(init.headers||(typeof input!=='string'&&input.headers)||{}); if(!h.has('authorization')) h.set('authorization','Bearer '+token); init.headers=h; if(!init.credentials) init.credentials='same-origin'; }
+    return orig.call(this,input,init).then(function(r){
+      if(r && r.status===401 && isApi(u) && !/\/api\/auth\//.test(u) && !redir){ redir=true; var from=location.pathname+location.search+location.hash; (window.top||window).location.replace('/login?from='+encodeURIComponent(from)); }
+      return r;
+    });
+  };
+})();
+  var $ = function(id){ return document.getElementById(id) }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]}) }
+  var SECTION_LABEL={welcome:'환영',treatmentIntro:'치료 안내',confirm:'부위 확인',process:'진행 순서',sense:'감각',comm:'소통',caution:'주의사항',next:'다음 안내'}
+  var AUD_LABEL={child:'소아',adult:'소아 아님(성인)',unknown:'생년월일 모름 → 성인 화면'}
+  var FB_LABEL={symptom:'호소형',pending:'조건부',unknown:'미확인',empty:'빈칸'}
+  /* 카드 ID 의 단계 이름 → 사람이 읽는 이름. 공개 API 가 카드 내용을 주지 않는 seed 카드용(01 문서 §3).
+     🔴 **추정 표기다** — 화면에 점선으로 구분해 「단계 이름」임을 드러낸다. 실제 카드 문구가 아니다. */
+  var STAGE_LABEL={welcome:'환영 인사',greeting:'인사',scope:'오늘의 치료 범위',about:'치료 소개',intro:'치료 소개',purpose:'치료 목적',process:'치료 과정',flow:'진행 순서',
+    sense:'치료 중 느낌',feel:'치료 중 느낌',feeling:'치료 중 느낌',comm:'소통 안내',communication:'소통 안내',caution:'치료 후 주의사항',next:'다음 단계 안내',nextvisit:'다음 내원 안내','next-reminder':'다음 내원 안내',
+    qrContact:'예약·문의 안내(QR)',qr:'예약·문의 안내(QR)',contact:'연락이 필요한 경우',emergency:'이럴 땐 연락',notice:'안내 사항',thanks:'마무리 인사',end:'마무리 인사',done:'마무리 인사',complete:'마무리 인사',outro:'마무리',
+    check:'확인','mid-check':'중간 확인',verify:'확인',sensitivity:'시림 안내','sensitivity-after':'시림 안내',nerve:'신경치료 안내','nerve-risk':'신경치료 가능성',
+    temp:'임시치아 안내','temp-caution':'임시치아 주의','temp-food':'임시치아 식사 주의',prep:'치아 다듬기(프렙)',scan:'디지털 스캔',impression:'본뜨기(인상채득)',setting:'최종 세팅',bonding:'최종 접착',
+    fitting:'맞춤 확인',tryfit:'맞춤 확인',tryin:'시적(맞춰 보기)',adapt:'적응 과정',care:'관리 안내',management:'관리 안내',manage:'관리 안내',food:'식사 주의사항',meal:'식사 주의사항','hard-food':'딱딱한 음식 주의',diet:'식사 주의사항',
+    prognosis:'예후 안내',reaction:'치료 후 반응',normalReaction:'정상 반응','post-symptoms':'치료 후 증상',swelling:'붓기 안내',bleeding:'출혈 안내',pain:'통증 안내',recovery:'회복 안내',goodRecovery:'회복 안내',
+    anesthesia:'마취 안내','anesthesia-guide':'마취 안내','anesthesia-after':'마취 후','anesthesia-duration':'마취 지속 시간','anesthesia-wear':'마취가 풀릴 때',optionalAnesthesia:'마취 안내','anesthesia-painless':'무통 마취',
+    'dental-fear':'불안 완화 안내',anxiety:'불안 완화 안내',reassure:'안심 안내',comfort:'편안한 진료',overview:'검진 개요',xray:'엑스레이 촬영',precheck:'사전 확인',additionalTreatment:'추가 치료 안내',
+    todayContent:'오늘 진료 내용',checkContent:'오늘 확인 내용',afterCare:'치료 후 관리',aftercare:'치료 후 관리',orthoCaries:'교정 중 충치 예방',applianceAdaptation:'장치 적응',gum:'잇몸 안내',anterior:'앞니 보철 안내',
+    fracture:'파절 주의','fracture-risk':'파절 주의','extraction-risk':'발치 가능성','session-count':'치료 횟수 안내',why:'이유 안내',reason:'이유 안내',design:'디자인',milling:'제작',occlusion:'교합 확인',adjust:'조정',adjustment:'조정',remake:'재제작 안내',protect:'보호 안내',confirm:'확인'}
+
+  var S={ data:null, open:{}, v0:{ok:false,map:{},cards:{},custom:[],err:''}, tax:{cats:[],labels:{}}, cap:{}, today:null }
+
+  /* 🔴 이 문서는 셸 iframe 안에서 **자기 높이 전체**로 펼쳐진다(안쪽 스크롤 없음). 그래서 position:fixed 는
+     「문서 맨 위」에 붙어, 사용자가 아래로 내려 본 상태면 편집 창·알림이 화면 밖에 뜬다.
+     → 부모 화면에서 지금 보이는 구간을 재서 그 자리에 놓는다(같은 출처라 frameElement 를 읽을 수 있다). */
+  function visible(){
+    try{ var r=window.frameElement.getBoundingClientRect(); var vh=window.parent.innerHeight
+      return {top:Math.max(0,-r.top), h:Math.min(vh, r.bottom)-Math.max(0,r.top)} }catch(e){ return {top:0,h:window.innerHeight} }
+  }
+  function toast(msg){ var t=$('toast'); var v=visible(); t.style.top=Math.max(8,v.top+v.h-56)+'px'; t.textContent=msg; t.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(function(){t.classList.remove('on')},1800) }
+
+  /* ── 높이를 부모(셸)에게 알린다 ── */
+  function postHeight(){
+    try{ var h=Math.ceil(document.documentElement.scrollHeight); if(h!==postHeight._h){ postHeight._h=h; parent.postMessage({type:'chair-rules-height',h:h},'*') } }catch(e){}
+  }
+  if(window.ResizeObserver){ new ResizeObserver(postHeight).observe(document.body) } else { setInterval(postHeight,500) }
+
+  /* ── 서버 호출 ── */
+  function api(method,path,body){
+    var opt={method:method,headers:{accept:'application/json'}}
+    if(body!==undefined){ opt.headers['content-type']='application/json'; opt.body=JSON.stringify(body) }
+    return fetch(path,opt).then(function(r){
+      return r.json().catch(function(){ return null }).then(function(j){
+        if(!r.ok||!j||j.ok===false){ var m=(j&&j.error)||('HTTP '+r.status); throw new Error(m) }
+        return j.data
+      })
+    })
+  }
+  function getJson(path){ return fetch(path,{headers:{accept:'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json() }) }
+
+  /* ── 템플릿 이름·카드 ── */
+  function tplLabel(k){
+    if(!k) return '템플릿 없음 (기본 8섹션)'
+    var L=(S.data&&S.data.templateLabels)||{}
+    if(L[k]) return L[k]
+    if(S.tax.labels[k]) return S.tax.labels[k]
+    var cu=S.v0.custom.filter(function(c){return (c.id||c.key)===k})[0]
+    if(cu&&cu.label) return cu.label
+    return k
+  }
+  /* 다른 템플릿에서 빌려 온 seed 카드 묶음 — 비공개 카드라도 「어느 묶음인지」는 ID 로 안다. */
+  var SEED_GROUP={sinus:'상악동 안내',extPost:'발치 후 안내',endoCare:'신경치료 후 관리',scalingCare:'스케일링 후 관리',prosthoCare:'보철 관리',lamCare:'라미네이트 관리',shared:'공통 안내'}
+  function cardTitles(k){
+    var ids=S.v0.map[k]
+    if(!ids) return null
+    var cap=S.cap[k]
+    return ids.map(function(id,i){
+      if(cap&&cap.titles.length===ids.length) return {t:cap.titles[i],k:'real'}
+      var c=S.v0.cards[id]; if(c&&c.title) return {t:c.title,k:'real'}
+      var m=/^seed:([^:]+):(.+)$/.exec(id); var grp=m?m[1]:''; var st=(m?m[2]:id).replace(/^s\d+b?-/,'')
+      if(/^(?:[a-z]+-)?c\d+[ab]?$/.test(st)) return {t:(SEED_GROUP[grp]&&grp!==k?SEED_GROUP[grp]+' · ':'')+'내용 비공개',k:'hidden'}
+      if(STAGE_LABEL[st]) return {t:STAGE_LABEL[st],k:'stage'}
+      var base=st.replace(/\d+[ab]?$/,'')
+      if(STAGE_LABEL[base]) return {t:STAGE_LABEL[base],k:'stage'}
+      return {t:st.replace(/[-_]/g,' '),k:'stage'}
+    })
+  }
+  /* 미리보기 장 목록 — 「카드」·「섹션」 칸과 **같은 근거**(cardTitles·v.sections)에서 만든다. 다른 근거를 쓰면 장 수가 어긋난다. */
+  var SECTION_DEF={   // 운영 mediqr CHAIR_BRIEFING_SECTION_DEFS 의 기본 제목·문구(chairBriefing.constant) — 템플릿 없는 규칙의 화면
+    welcome:['환영 인사','환자님, 반갑습니다.\n편안한 치료를 위해서 최선을 다하겠습니다.'],
+    treatmentIntro:['치료 안내','오늘 진료받으실 치료를 먼저 간단히 안내드리겠습니다.\n흐름을 미리 알고 시작하시면 더 편안합니다.'],
+    confirm:['치료 부위 확인','치아 모식도에서 치료 부위를 보여드립니다.\n오늘 어느 치아를 치료하는지 함께 확인하겠습니다.'],
+    process:['치료과정 안내',''],
+    sense:['감각 안내','치료 중에는 시림이나 압박감이 잠시 있을 수 있습니다.\n대부분은 잠깐 지나가는 정상 반응입니다.'],
+    comm:['소통 안내','치료중 통증이나 치료 과정에서 불편감이 있으시면\n언제든 왼쪽 손을 들어 알려주세요.\n의료진이 바로 확인하고 조절해 드립니다.'],
+    caution:['치료후 주의사항','끈적이거나 딱딱한 음식은 피해 주세요.\n새로운 수복물에 적응하는 동안 차갑거나 뜨거운\n음식에 예민할 수 있으니 조심하셔야 합니다.\n치료 후에는 주의사항을 꼭 확인해 주세요.\n조금만 지켜주셔도 회복이 훨씬 편합니다.'],
+    next:['치료 마무리 멘트','진료가 끝나면 다음 일정과 예약을 안내드립니다.\n마무리 안내를 듣고 편하게 이동하시면 됩니다.']
+  }
+  function pagesOfTemplate(k, sections, tag){
+    if(!k){
+      return sections.map(function(s,i){ var d=SECTION_DEF[s]||[SECTION_LABEL[s]||s,'']
+        return {title:d[0], card:{message:d[1]}, kind:'section', tag:tag||'', no:i+1} })
+    }
+    var ids=S.v0.map[k]||[], ts=cardTitles(k)||[]
+    return ids.map(function(id,i){
+      var c=S.v0.cards[id]||null, t=ts[i]||{t:id,k:'stage'}
+      // 본문이 없는 카드(비공개·단계 이름)는 제목만 — 지어내지 않는다(재생기가 「본문이 비어 있습니다」로 표시)
+      return {title:t.t, card:c?{message:c.message||'',subDesc1:c.subDesc1||'',subDesc2:c.subDesc2||'',iconSrc:c.iconSrc||c.headerIconSrc||''}:null, kind:t.k, tag:tag||'', no:i+1}
+    })
+  }
+  function previewPages(v){
+    if(v.ageSplit) return pagesOfTemplate(v.childTemplate, v.sections, pedLabel()).concat(pagesOfTemplate(v.template, v.sections, '그 외'))
+    return pagesOfTemplate(v.template, v.sections, '')
+  }
+  function previewMeta(v,pages){
+    var part=function(k){ return k?(tplLabel(k)+' 카드 '+((S.v0.map[k]||[]).length)+'장'):('기본 섹션 '+v.sections.length+'개') }
+    return v.ageSplit?(pedLabel()+' '+part(v.childTemplate)+' + 그 외 '+part(v.template)):part(v.template)
+  }
+  function cardCount(k){ if(!k) return null; var ids=S.v0.map[k]; return ids?ids.length:0 }
+  /* 소아 기준 — 서버가 재방문 타겟 모델(pediatricAgeLtYears)에서 읽어 준다. 화면은 숫자를 갖지 않는다. */
+  function pedLabel(){ var p=(S.data&&S.data.pediatric)||{}; return '소아(만 '+(p.ageLtYears!=null?p.ageLtYears:'?')+'세 미만)' }
+  function pedSrc(){ var p=(S.data&&S.data.pediatric)||{}; return '재방문 타겟 모델 '+(p.model||'?')+' 의 소아 기준' }
+  function tplCell(r){
+    var k=r.template
+    if(r.ageSplit){
+      return '<div class="tiny" style="color:var(--violet);font-weight:700">나이로 구분</div>'
+        +'<div><span class="tiny">'+esc(pedLabel())+'</span> <span class="tpl">'+esc(tplLabel(r.childTemplate))+'</span></div>'
+        +'<div><span class="tiny">그 외</span> <span class="tpl">'+esc(tplLabel(k))+'</span></div>'
+    }
+    var html='<div class="tpl">'+esc(tplLabel(k))+'</div>'
+    if(k) html+='<div class="tplkey">'+esc(k)+'</div>'
+    return html
+  }
+  function cardCell(r){
+    if(!r.template) return '<span class="badge">8섹션</span>'
+    if(!S.v0.ok) return '<span class="badge" title="카드 목록을 못 읽었습니다">?</span>'
+    var n=cardCount(r.template)
+    if(!(r.template in S.v0.map)) return '<span class="badge b-red" title="템플릿 카드맵에 없는 키">없음</span>'
+    if(n===0) return '<span class="badge b-amber" title="카드 0장 — 기본 8섹션만 뜹니다">0장</span>'
+    return '<span class="badge b-blue">'+n+'장</span>'
+  }
+
+  /* ── 그리기 ── */
+  function statusBadge(v){
+    if(v.custom) return '<span class="badge b-violet">사용자</span>'
+    if(v.overridden) return '<span class="badge b-amber" title="'+esc(v.changed.join(', '))+'">변경됨</span>'
+    return '<span class="badge b-green">기본</span>'
+  }
+  function kwCell(v){
+    if(v.fallback) return '<span class="tiny">'+esc(v.note)+'</span>'
+    var kw=v.kw||[]; var shown=kw.slice(0,7).map(function(k){return '<span class="chip">'+esc(k)+'</span>'}).join('')
+    if(kw.length>7) shown+='<span class="tiny"> +'+(kw.length-7)+'</span>'
+    return shown
+  }
+  function passFilter(v){
+    var f=$('flt').value, q=$('q').value.trim().toLowerCase()
+    if(f==='changed'&&!v.overridden&&!v.custom) return false
+    if(f==='off'&&v.enabled) return false
+    if(f==='none'&&v.template) return false
+    if(f==='custom'&&!v.custom) return false
+    if(q){
+      var hay=[v.id,v.name,v.family,v.template,tplLabel(v.template)].concat(v.kw||[]).join(' ').toLowerCase()
+      if(hay.indexOf(q)<0) return false
+    }
+    return true
+  }
+  function rowHTML(v){
+    var off=!v.enabled
+    var h='<tr class="rule'+(off?' off':'')+'" data-id="'+esc(v.id)+'">'
+    h+='<td>'+(v.fallback?'<span class="tiny">항상</span>':'<button type="button" class="switch'+(v.enabled?' on':'')+'" data-act="toggle" data-id="'+esc(v.id)+'" aria-label="사용"></button>')+'</td>'
+    h+='<td><div class="name">'+esc(v.name)+'</div><div class="id">'+esc(v.id)+'</div></td>'
+    h+='<td>'+kwCell(v)+'</td>'
+    h+='<td>'+(v.fallback?'—':esc(v.prio))+'</td>'
+    h+='<td>'+tplCell(v)+'</td>'
+    h+='<td>'+(v.ageSplit?cardCell({template:v.childTemplate})+'<br>'+cardCell(v):cardCell(v))+'</td>'
+    h+='<td><span class="badge'+(v.sections.length<8?' b-amber':'')+'">'+v.sections.length+'/8</span></td>'
+    h+='<td>'+statusBadge(v)+'</td>'
+    /* ▶ 체어 모니터 미리보기(사용자 지시 2026-10-21) — 「브리핑 템플릿 기본 카드 설정」 탭의 재생 아이콘과 같은 모양.
+       누르면 이 규칙으로 판정된 환자에게 체어 모니터에 실제로 뜨는 화면(chair-briefing-live 의 환자 화면)을 띄운다. */
+    h+='<td style="text-align:right;white-space:nowrap"><button type="button" class="playbtn" data-act="preview" data-id="'+esc(v.id)+'" title="체어 모니터 미리보기" aria-label="'+esc(v.name)+' 체어 모니터 미리보기"><svg viewBox="0 0 256 256" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm36.44-94.66-48-32A8,8,0,0,0,104,96v64a8,8,0,0,0,12.44,6.66l48-32a8,8,0,0,0,0-13.32ZM120,145.05V111l25.58,17Z"></path></svg></button> <button type="button" class="btn sm" data-act="edit" data-id="'+esc(v.id)+'">편집</button> '
+    if(v.custom) h+='<button type="button" class="btn sm danger" data-act="reset" data-id="'+esc(v.id)+'">삭제</button>'
+    else h+='<button type="button" class="btn sm" data-act="reset" data-id="'+esc(v.id)+'"'+(v.overridden?'':' disabled')+'>초기화</button>'
+    h+='</td></tr>'
+    if(S.open[v.id]) h+=detailHTML(v)
+    return h
+  }
+  function detailHTML(v){
+    if(v.ageSplit){
+      var kid=Object.assign({},v,{template:v.childTemplate,ageSplit:false})
+      var adult=Object.assign({},v,{ageSplit:false})
+      return '<tr class="detail"><td></td><td colspan="8"><div class="tiny" style="color:var(--violet)"><b>나이로 구분</b> — '+esc(pedLabel())+'이면 위, 그 외(성인·생년월일 모름)는 아래 화면. 기준은 '+esc(pedSrc())+'입니다.</div></td></tr>'
+        +detailHTML(kid).replace('<b>모니터에 넘어가는 화면</b>','<b>'+esc(pedLabel())+' — 모니터에 넘어가는 화면</b>')
+        +detailHTML(adult).replace('<b>모니터에 넘어가는 화면</b>','<b>그 외 — 모니터에 넘어가는 화면</b>')
+    }
+    var titles=v.template?cardTitles(v.template):null
+    var cards
+    if(!v.template){
+      var secs=v.sections.map(function(s){return '<span class="cardt"><i>섹션</i>'+esc(SECTION_LABEL[s]||s)+'</span>'}).join('')
+      cards='<div class="tiny">템플릿 없이 기본 8섹션(아래 체크된 것)만 뜹니다.</div><div class="cards">'+secs+'</div>'
+    } else if(!S.v0.ok){
+      cards='<div class="tiny">카드 목록을 못 읽어 보여 줄 수 없습니다.</div>'
+    } else if(!titles){
+      cards='<div class="tiny" style="color:var(--red)">템플릿 카드맵에 이 키가 없습니다 — 모니터에 카드가 뜨지 않습니다.</div>'
+    } else if(!titles.length){
+      cards='<div class="tiny" style="color:var(--amber)">이 템플릿은 카드가 0장입니다 — 모니터에는 기본 8섹션만 뜹니다.</div>'
+    } else {
+      var real=titles.filter(function(x){return x.k==='real'}).length
+      cards='<div class="cards">'+titles.map(function(x,i){
+          var cls=x.k==='real'?'cardt':(x.k==='stage'?'cardt est':'cardt hid')
+          var tip=x.k==='real'?'':(x.k==='stage'?' title="공개 API 에 내용이 없어 카드의 단계 이름으로 표시"':' title="원본 앱에 내장된 카드 — 공개 API 로 내용을 볼 수 없음"')
+          return '<span class="'+cls+'"'+tip+'><i>'+(i+1)+'</i>'+esc(x.t)+'</span>'}).join('')+'</div>'
+        +(real<titles.length?'<div class="tiny" style="margin-top:4px">실선 = 실제 카드 제목 '+real+'장 · 점선 = 카드 단계 이름(추정) · 회색 = 내용 비공개 — 원본 앱 내장 카드라 공개 API 로 문구를 볼 수 없습니다.</div>':'')
+    }
+    var d=v.default
+    var diff=''
+    if(v.overridden&&d){
+      diff='<div class="tiny" style="margin-top:6px">기본값: 템플릿 <b>'+esc(tplLabel(d.template))+'</b> · 우선 '+esc(d.prio)+' · 키워드 '+esc((d.kw||[]).join(', ')||'—')+(d.enabled?'':' · 꺼짐')+'</div>'
+    }
+    return '<tr class="detail"><td></td><td colspan="8">'
+      +'<div class="tiny"><b>모니터에 넘어가는 화면</b> — '+esc(tplLabel(v.template))+'</div>'+cards
+      +'<div class="tiny" style="margin-top:8px"><b>표시 섹션</b> '+v.sections.map(function(s){return esc(SECTION_LABEL[s]||s)}).join(' · ')+'</div>'
+      +'<div class="tiny" style="margin-top:4px"><b>환자용 한 줄</b> '+(v.line?esc(v.line):'<span style="color:var(--muted)">(없음 — 지어내지 않음)</span>')+'</div>'
+      +(v.avoid?'<div class="tiny" style="margin-top:4px"><b>제외 조건</b> 예약 내용에 '+avoidWords(v.avoid).map(function(w){return '<span class="chip">'+esc(w)+'</span>'}).join(' ')+' 가 있으면 이 규칙을 쓰지 않습니다</div>':'')
+      +(v.note?'<div class="tiny" style="margin-top:4px"><b>기본 대응 근거</b> '+esc(v.note)+'</div>':'')
+      +diff+'</td></tr>'
+  }
+  /* 제외 조건(정규식)을 사람이 읽는 낱말로 — (?i)·경계 표기를 걷어 낸다. 판정에는 쓰지 않는다(표시용). */
+  function avoidWords(p){
+    return String(p).replace(/^\(\?i\)/,'').replace(/\(\?:\^\|\[\^A-Za-z0-9_\]\)/g,'').replace(/\(\?:\[\^A-Za-z0-9_\]\|\$\)/g,'').split('|').filter(Boolean)
+  }
+  function flat(v){ var r=v; var o={}; for(var k in r) o[k]=r[k]; return o }
+  function render(){
+    var d=S.data; if(!d) return
+    var src=d.source||{}
+    $('srcLine').textContent='기본표 출처: '+(src.repo||'')+' '+(src.file||'')+' @ '+(src.commit||'?')+' · 규칙 '+(src.rules||'?')+'개 · 템플릿·카드: '+(S.v0.src||'—')
+    var sm=d.summary
+    $('summary').innerHTML='<span class="badge">규칙 '+sm.rules+'</span><span class="badge b-amber">변경 '+sm.overridden+'</span><span class="badge b-violet">사용자 규칙 '+sm.custom+'</span><span class="badge'+(sm.disabled?' b-red':'')+'">꺼진 규칙 '+sm.disabled+'</span><span class="badge">판정 실패 칸 '+d.fallbacks.length+'</span>'
+    var rows=d.rules.map(flat).filter(passFilter)
+    var fams=[]; var byFam={}
+    rows.forEach(function(v){ if(!byFam[v.family]){ byFam[v.family]=[]; fams.push(v.family) } byFam[v.family].push(v) })
+    var h=''
+    fams.forEach(function(f){ h+='<tr class="fam"><td colspan="9">'+esc(f)+' <span class="tiny">'+byFam[f].length+'</span></td></tr>'; byFam[f].forEach(function(v){ h+=rowHTML(v) }) })
+    var fb=d.fallbacks.map(flat).filter(passFilter)
+    if(fb.length){ h+='<tr class="fam"><td colspan="9">판정 실패 — 조건에 하나도 안 걸렸을 때 <span class="tiny">'+fb.length+'</span></td></tr>'; fb.forEach(function(v){ h+=rowHTML(v) }) }
+    if(!h) h='<tr><td colspan="9" class="tiny" style="padding:16px">조건에 맞는 규칙이 없습니다.</td></tr>'
+    $('tbody').innerHTML=h
+    $('ruleCount').textContent='표시 '+rows.length+' / '+d.rules.length+' · 판정 실패 '+fb.length
+    postHeight()
+  }
+
+  /* ── 불러오기 ── */
+  function loadRules(){
+    return api('GET','/api-v1/chair-briefing/rules').then(function(d){ S.data=d; $('loadErr').classList.add('hidden'); render() })
+      .catch(function(e){ var el=$('loadErr'); el.textContent='규칙을 불러오지 못했습니다: '+e.message; el.classList.remove('hidden'); $('srcLine').textContent=''; postHeight() })
+  }
+  /* 🔴 템플릿·카드 = **api-v1 카드 API 하나**(카드 리스트 탭 cbLoad 와 같은 출처 — 서버 mediqr_fixed).
+     ⚠️ 함수·변수 이름(S.v0)은 옛 이름 그대로 둔다 — 화면 곳곳이 참조한다. 출처는 S.v0.src 에 적는다. */
+  function loadV0(){
+    var base='/api-v1/data/api/chair-briefing-cards'
+    var soft=function(u,dflt){ return getJson(u).catch(function(){ return dflt }) }
+    return Promise.all([
+      soft(base+'/template-default-card-map',{map:{}}),
+      soft(base,{items:[]}),
+      soft(base+'/custom-templates',{items:[]})
+    ]).then(function(a){
+      var map=(a[0]&&a[0].map)||{}, items=(a[1]&&a[1].items)||[], custom=(a[2]&&a[2].items)||[]
+      /* 🔴 카드는 API 하나로(2026-10-21) — 서버가 mediqr 고정값 응답 + 앱 번들 기본 카드를 합쳐 내린다. 정적 파일을 따로 읽지 않는다. */
+      var cnt=(a[1]&&a[1].counts)||null
+      return {map:map,items:items,custom:custom,
+        src:'api-v1 /chair-briefing-cards — mediqr 고정값 저장본'+(cnt?(' (API '+cnt.api+'장 + 앱 번들 기본 카드 '+cnt.bundle+'장)'):'')}
+    }).then(function(o){
+      if(!o.map||!Object.keys(o.map).length) throw new Error('카드맵이 비어 있습니다')
+      S.v0.map=o.map; S.v0.ok=true; S.v0.src=o.src
+      o.items.forEach(function(c){ S.v0.cards[c.id]=c })
+      S.v0.custom=o.custom
+      $('v0warn').classList.add('hidden')
+    }).catch(function(e){
+      S.v0.ok=false; S.v0.err=e.message
+      var w=$('v0warn'); w.textContent='템플릿·카드를 읽지 못했습니다 — 카드 수·카드 목록을 표시할 수 없습니다. ('+e.message+')'; w.classList.remove('hidden')
+    })
+  }
+  function loadTax(){
+    return getJson('/view-v1/assets/runtime.json').then(function(j){ var t=j.cardsTaxonomy||{}; S.tax.cats=t.categories||[]; S.tax.labels=t.labels||{} }).catch(function(){})
+  }
+  function loadCap(){
+    return getJson('/view-v1/pages/chair-briefing-rules.cards.json').then(function(j){ S.cap=j.templates||{} }).catch(function(){})
+  }
+
+  /* ── 동작 ── */
+  function findView(id){
+    var d=S.data; if(!d) return null
+    return d.rules.concat(d.fallbacks).filter(function(v){return v.id===id})[0]||null
+  }
+  function bodyOf(v,over){
+    var b={name:v.name,line:v.line,kw:v.kw||[],prio:v.prio,template:v.template,sections:v.sections,enabled:v.enabled,ageSplit:!!v.ageSplit,childTemplate:v.childTemplate||''}
+    for(var k in (over||{})) b[k]=over[k]
+    return b
+  }
+  function save(id,body){
+    return api('PUT','/api-v1/chair-briefing/rules/'+encodeURIComponent(id),body).then(function(d){ S.data=d; render(); return d })
+  }
+  $('tbody').addEventListener('click',function(e){
+    var b=e.target.closest('[data-act]')
+    if(b){
+      e.stopPropagation()
+      var id=b.getAttribute('data-id'), act=b.getAttribute('data-act'), v=findView(id)
+      if(!v) return
+      if(act==='toggle'){
+        save(id,bodyOf(v,{enabled:!v.enabled})).then(function(){ toast((v.enabled?'껐습니다':'켰습니다')+' — '+v.name) }).catch(function(err){ toast('저장 실패: '+err.message) })
+      } else if(act==='edit'){ openEditor(v) }
+      else if(act==='preview'){
+        /* 🔴 미리보기 = **이 규칙 설정 그대로의 장 수**(사용자 지시 2026-10-21 — 「카드·섹션이 여러 개인데 1장만 나온다」).
+           템플릿이 있으면 그 템플릿 카드 전부(표의 「카드」 칸 N장과 같은 목록·같은 순서),
+           템플릿이 없으면 체크된 표시 섹션 전부(「섹션」 칸 n/8). 나이로 구분하는 규칙은 두 화면을 이어서 보인다.
+           셸(바깥)이 슬라이드 재생기를 띄운다 — 이 문서는 수천 px iframe 이라 여기 띄우면 화면 밖에 뜬다. */
+        var pages=previewPages(v)
+        if(!pages.length){ toast('보여 줄 카드·섹션이 없습니다'); return }
+        var msg={type:'chair-rules-preview',id:id,name:v.name,pages:pages,meta:previewMeta(v,pages)}
+        if(window.parent && window.parent!==window){ try{ window.parent.postMessage(msg,'*') }catch(err){ toast('미리보기를 열지 못했습니다') } }
+        else toast('셸(체어 브리핑 카드 리스트 화면) 안에서 열어 주세요')
+      }
+      else if(act==='reset'){
+        var msg=v.custom?('사용자 규칙 「'+v.name+'」을 삭제할까요?'):('「'+v.name+'」을 기본값으로 되돌릴까요?')
+        if(!confirm(msg)) return
+        api('DELETE','/api-v1/chair-briefing/rules/'+encodeURIComponent(id)).then(function(d){ S.data=d; render(); toast(v.custom?'삭제했습니다':'기본값으로 되돌렸습니다') }).catch(function(err){ toast('실패: '+err.message) })
+      }
+      return
+    }
+    var tr=e.target.closest('tr.rule'); if(!tr) return
+    var rid=tr.getAttribute('data-id'); S.open[rid]=!S.open[rid]; render()
+  })
+  $('q').addEventListener('input',render)
+  $('flt').addEventListener('change',render)
+  $('btnResetAll').addEventListener('click',function(){
+    if(!confirm('모든 규칙을 기본값으로 되돌리고 사용자 규칙을 지웁니다. 계속할까요?')) return
+    api('POST','/api-v1/chair-briefing/rules-reset').then(function(d){ S.data=d; render(); toast('전체 초기화했습니다 ('+d.removed+'개 설정 삭제)') }).catch(function(err){ toast('실패: '+err.message) })
+  })
+  $('btnAdd').addEventListener('click',function(){ openEditor(null) })
+
+  /* ── 편집 창 ── */
+  function tplOptions(cur){
+    var seen={}; var h='<option value="">템플릿 없음 (기본 8섹션)</option>'
+    function opt(k){ if(!k||seen[k]) return ''; seen[k]=1; var n=S.v0.ok?cardCount(k):null; return '<option value="'+esc(k)+'"'+(k===cur?' selected':'')+'>'+esc(tplLabel(k))+' · '+esc(k)+(n===null?'':' ('+n+'장)')+'</option>' }
+    S.tax.cats.forEach(function(c){
+      var inner=(c.templates||[]).map(opt).join('')
+      if(inner) h+='<optgroup label="'+esc(c.label)+'">'+inner+'</optgroup>'
+    })
+    // __monitor_*__ 는 모니터 상태 화면(대기·치료완료)이지 진료 템플릿이 아니다 — 고를 수 없게 뺀다.
+    var rest=Object.keys(S.v0.map).filter(function(k){return !seen[k] && !/^custom-/.test(k) && !/^__/.test(k)})
+    if(rest.length) h+='<optgroup label="분류표 밖(카드맵)">'+rest.map(opt).join('')+'</optgroup>'
+    var cus=S.v0.custom.map(function(c){return c.id||c.key}).filter(Boolean)
+    if(cus.length) h+='<optgroup label="사용자 생성 템플릿">'+cus.map(opt).join('')+'</optgroup>'
+    if(cur&&!seen[cur]) h+='<optgroup label="지금 값(목록에 없음)">'+opt(cur)+'</optgroup>'
+    return h
+  }
+  function openEditor(v){
+    var isNew=!v, fb=v&&v.fallback
+    var cur=v||{name:'',line:'',kw:[],prio:50,template:'',sections:(S.data&&S.data.sections)||Object.keys(SECTION_LABEL),enabled:true}
+    var secs=(S.data&&S.data.sections)||Object.keys(SECTION_LABEL)
+    var h='<div class="modal-bg" id="mbg"><div class="modal" role="dialog" aria-modal="true">'
+      +'<div class="row between"><h3>'+(isNew?'규칙 추가':esc(cur.name)+' <span class="id">'+esc(cur.id)+'</span>')+'</h3>'
+      +(v&&!v.custom&&!fb?'<span class="tiny">기본 규칙 — 바꾼 칸만 저장됩니다</span>':'')+'</div>'
+      +(fb?'<div class="note" style="margin-top:8px">'+esc(cur.note)+' — 조건이 「못 찾음」 자체라 화면(템플릿·섹션·한 줄)만 바꿀 수 있습니다.</div>':'')
+      +(!fb?'<div class="field"><label>진료 이름</label><input type="text" id="e_name" maxlength="40" value="'+esc(cur.name)+'"></div>':'')
+      +(!fb?'<div class="field"><label>조건(키워드) — 쉼표로 구분 · 예약 내용에 이 글자가 있으면 이 진료로 봅니다</label><textarea id="e_kw" rows="3">'+esc((cur.kw||[]).join(', '))+'</textarea></div>':'')
+      +(!fb?'<div class="grid2"><div class="field"><label>우선순위 (0~200 · 클수록 대표)</label><input type="number" id="e_prio" min="0" max="200" value="'+esc(cur.prio)+'"></div>'
+        +'<div class="field"><label>사용</label><label style="font-weight:600"><input type="checkbox" id="e_en"'+(cur.enabled?' checked':'')+'> 이 규칙으로 판정</label></div></div>':'')
+      +'<div class="field"><label id="e_tpl_lbl">'+(cur.ageSplit?'그 외(성인·생년월일 모름) — 모니터 화면(템플릿)':'모니터 화면(템플릿)')+'</label><select id="e_tpl">'+tplOptions(cur.template)+'</select></div>'
+      +'<div class="field"><label style="font-weight:600"><input type="checkbox" id="e_split"'+(cur.ageSplit?' checked':'')+'> 나이로 나누기 — '+esc(pedLabel())+'이면 다른 화면 <span class="tiny">('+esc(pedSrc())+')</span></label>'
+      +'<div id="e_child_box" style="margin-top:6px'+(cur.ageSplit?'':';display:none')+'"><label>'+esc(pedLabel())+' — 모니터 화면(템플릿)</label><select id="e_child">'+tplOptions(cur.childTemplate||'')+'</select></div></div>'
+      +'<div class="field"><label>표시 섹션</label><div class="seclist">'+secs.map(function(s){ return '<label><input type="checkbox" data-sec="'+esc(s)+'"'+(cur.sections.indexOf(s)>=0?' checked':'')+'>'+esc(SECTION_LABEL[s]||s)+'</label>' }).join('')+'</div></div>'
+      +'<div class="field"><label>환자용 한 줄</label><textarea id="e_line" rows="2" maxlength="300">'+esc(cur.line)+'</textarea></div>'
+      +'<div id="e_err" class="err hidden" style="margin-top:10px"></div>'
+      +'<div class="row between" style="margin-top:16px"><div>'
+      +(v&&(v.overridden)&&!v.custom?'<button class="btn danger" type="button" id="e_reset">이 규칙 초기화</button>':'')
+      +'</div><div class="row"><button class="btn" type="button" id="e_cancel">취소</button><button class="btn primary" type="button" id="e_save">저장</button></div></div>'
+      +'</div></div>'
+    $('modalHost').innerHTML=h
+    var vis=visible(); var mbg=$('mbg')
+    mbg.style.height=Math.max(document.documentElement.scrollHeight, vis.top+vis.h)+'px'
+    // 셸 상단 바(약 64px)가 iframe 위를 덮는다 — 그 아래로 내린다.
+    mbg.style.paddingTop=(vis.top+(vis.top>0?88:24))+'px'
+    function close(){ $('modalHost').innerHTML=''; postHeight() }
+    $('e_cancel').onclick=close
+    $('e_split').onchange=function(){ var on=this.checked; $('e_child_box').style.display=on?'':'none'; $('e_tpl_lbl').textContent=on?'그 외(성인·생년월일 모름) — 모니터 화면(템플릿)':'모니터 화면(템플릿)'; postHeight() }
+    $('mbg').addEventListener('click',function(e){ if(e.target.id==='mbg') close() })
+    if($('e_reset')) $('e_reset').onclick=function(){
+      if(!confirm('「'+cur.name+'」을 기본값으로 되돌릴까요?')) return
+      api('DELETE','/api-v1/chair-briefing/rules/'+encodeURIComponent(cur.id)).then(function(d){ S.data=d; render(); close(); toast('기본값으로 되돌렸습니다') }).catch(function(err){ showErr(err.message) })
+    }
+    function showErr(m){ var el=$('e_err'); el.textContent=m; el.classList.remove('hidden') }
+    $('e_save').onclick=function(){
+      var sections=[].slice.call(document.querySelectorAll('[data-sec]')).filter(function(c){return c.checked}).map(function(c){return c.getAttribute('data-sec')})
+      var body={
+        name: fb?cur.name:$('e_name').value,
+        kw: fb?[]:$('e_kw').value.split(/[,\n]/).map(function(s){return s.trim()}).filter(Boolean),
+        prio: fb?0:parseInt($('e_prio').value,10),
+        enabled: fb?true:$('e_en').checked,
+        template: $('e_tpl').value,
+        ageSplit: $('e_split').checked,
+        childTemplate: $('e_split').checked?$('e_child').value:'',
+        sections: sections,
+        line: $('e_line').value
+      }
+      if(!fb && isNaN(body.prio)) return showErr('우선순위는 숫자여야 합니다')
+      var p=isNew? api('POST','/api-v1/chair-briefing/rules',body) : api('PUT','/api-v1/chair-briefing/rules/'+encodeURIComponent(cur.id),body)
+      p.then(function(d){ S.data=d; if(isNew&&d.addedId) S.open[d.addedId]=true; render(); close(); toast(isNew?('추가했습니다 ('+d.addedId+')'):'저장했습니다') }).catch(function(err){ showErr(err.message) })
+    }
+    postHeight()
+  }
+
+  /* ── 시험 · 오늘 예약 ── */
+  function judgeHTML(o){
+    var head
+    if(o.primary){
+      head='<b>'+esc(o.primary.name)+'</b> <span class="id">'+esc(o.primary.id)+'</span>'
+      if(o.also.length) head+=' <span class="tiny">함께: '+o.also.map(function(h){return esc(h.name)}).join(', ')+'</span>'
+    } else {
+      head='<span class="badge b-amber">판정 실패 — '+esc(FB_LABEL[o.fallback]||o.fallback)+'</span>'
+    }
+    return '<div class="judge"><div class="tiny">정리된 내용: <span class="chip">'+esc(o.normalized||'(빈칸)')+'</span></div>'
+      +'<div style="margin-top:4px">'+head+'</div>'
+      +(o.ageSplit?'<div class="tiny" style="margin-top:4px;color:var(--violet)">나이로 구분: <b>'+esc(AUD_LABEL[o.audience]||o.audience)+'</b>'+(o.age!=null?' (만 '+o.age+'세)':'')+' · '+esc(pedSrc())+'</div>':'')
+      +'<div style="margin-top:4px">→ 모니터: <b>'+esc(tplLabel(o.template))+'</b>'+(o.template?' '+cardCell({template:o.template}):'')+' · 섹션 '+o.sections.length+'/8</div>'
+      +(o.line?'<div class="tiny" style="margin-top:4px">환자용 한 줄: '+esc(o.line)+'</div>':'')+'</div>'
+  }
+  function tryNow(){
+    var t=$('tryText').value, b=$('tryBirth').value.replace(/[^0-9]/g,'')
+    api('POST','/api-v1/chair-briefing/match',{items:[{text:t,birthYmd:b||null}]}).then(function(d){ $('tryOut').innerHTML=judgeHTML(d.results[0]); postHeight() })
+      .catch(function(e){ $('tryOut').innerHTML='<div class="err" style="margin-top:8px">'+esc(e.message)+'</div>'; postHeight() })
+  }
+  $('btnTry').addEventListener('click',tryNow)
+  $('tryText').addEventListener('keydown',function(e){ if(e.key==='Enter') tryNow() })
+
+  function kstYmd(){ var d=new Date(Date.now()+9*3600e3); return d.toISOString().slice(0,10).replace(/-/g,'') }
+  $('todayDate').value=kstYmd()
+  function hhmm(s){ var m=/^\d{8}(\d{2})(\d{2})/.exec(String(s||'')); if(m) return m[1]+':'+m[2]; var m2=/T(\d{2}):(\d{2})/.exec(String(s||'')); return m2?m2[1]+':'+m2[2]:'' }
+  $('btnToday').addEventListener('click',function(){
+    var ymd=$('todayDate').value.trim()
+    if(!/^\d{8}$/.test(ymd)){ $('todayOut').innerHTML='<div class="err" style="margin-top:8px">날짜는 YYYYMMDD 로 넣어 주세요</div>'; return }
+    $('todayOut').innerHTML='<div class="tiny" style="margin-top:8px">덴트웹 예약을 읽는 중…</div>'
+    fetch('/api/dw/appointments?date='+ymd,{headers:{accept:'application/json'}}).then(function(r){ return r.json().then(function(j){ if(!r.ok||!j||j.ok===false) throw new Error((j&&j.error)||('HTTP '+r.status)); return j.data }) })
+      .then(function(rows){
+        rows=Array.isArray(rows)?rows:[]
+        if(!rows.length){ S.today={rows:[],res:[]}; $('todayOut').innerHTML='<div class="tiny" style="margin-top:8px">'+ymd+' 예약이 0건입니다.</div>'; postHeight(); return }
+        // 재료(환자 ID)만 보낸다 — 나이는 서버가 덴트웹 생년월일로 낸다(화면을 믿지 않는다).
+        var items=rows.slice(0,500).map(function(r){return {text:r.note||'',patientId:(typeof r.patientId==='number'?r.patientId:null)}})
+        return api('POST','/api-v1/chair-briefing/match',{items:items}).then(function(d){ S.today={rows:rows.slice(0,500),res:d.results,lookup:d.ageLookup,total:rows.length}; renderToday(ymd) })
+      })
+      .catch(function(e){ $('todayOut').innerHTML='<div class="err" style="margin-top:8px">예약을 읽지 못했습니다(조회 실패 — 0건이 아닙니다): '+esc(e.message)+'</div>'; postHeight() })
+  })
+  function renderToday(ymd){
+    var T=S.today, n=T.res.length, ok=0, fb={}, tpl={}
+    T.res.forEach(function(o){ if(o.primary) ok++; else fb[o.fallback]=(fb[o.fallback]||0)+1; var k=o.template||''; tpl[k]=(tpl[k]||0)+1 })
+    var pct=function(x){ return n?Math.round(100*x/n):0 }
+    var h='<div class="kpi"><div>예약<b>'+n+'</b></div><div>진료 확정<b>'+ok+' <span class="tiny">'+pct(ok)+'%</span></b></div><div>판정 실패<b>'+(n-ok)+' <span class="tiny">'+pct(n-ok)+'%</span></b></div></div>'
+    if(n-ok) h+='<div class="tiny" style="margin-top:6px">실패 사유: '+Object.keys(fb).map(function(k){return esc(FB_LABEL[k]||k)+' '+fb[k]}).join(' · ')+'</div>'
+    var split=T.res.filter(function(o){return o.ageSplit}), aud={}
+    split.forEach(function(o){ aud[o.audience]=(aud[o.audience]||0)+1 })
+    if(split.length) h+='<div class="tiny" style="margin-top:6px;color:var(--violet)">나이로 구분된 예약 '+split.length+'건: '+Object.keys(aud).map(function(k){return esc(AUD_LABEL[k]||k)+' '+aud[k]}).join(' · ')+'</div>'
+    if(T.lookup==='failed') h+='<div class="warn" style="margin-top:6px">생년월일을 덴트웹에서 읽지 못했습니다 — 나이로 구분하는 진료는 전부 성인 화면으로 판정했습니다.</div>'
+    if(T.total>T.res.length) h+='<div class="tiny" style="margin-top:6px">예약 '+T.total+'건 중 앞 '+T.res.length+'건만 판정했습니다(한 번에 500건).</div>'
+    var top=Object.keys(tpl).sort(function(a,b){return tpl[b]-tpl[a]})
+    h+='<table style="margin-top:8px"><tbody>'+top.map(function(k){ return '<tr><td style="padding:3px 6px">'+esc(tplLabel(k))+'</td><td style="padding:3px 6px;width:40%"><div class="bar"><i style="width:'+pct(tpl[k])+'%"></i></div></td><td style="padding:3px 6px;width:50px;text-align:right">'+tpl[k]+'</td></tr>' }).join('')+'</tbody></table>'
+    h+='<div id="todayList" class="hidden" style="margin-top:8px;max-height:360px;overflow:auto"><table><thead><tr><th>시각</th><th>예약 내용(정리본)</th><th>진료</th><th>모니터</th></tr></thead><tbody>'
+      +T.res.map(function(o,i){ return '<tr><td>'+esc(hhmm(T.rows[i].scheduledAt))+'</td><td><span class="chip">'+esc(o.normalized||'(빈칸)')+'</span></td><td>'+(o.primary?esc(o.primary.name):'<span class="badge b-amber">'+esc(FB_LABEL[o.fallback]||o.fallback)+'</span>')+(o.ageSplit?' <span class="badge b-violet">'+esc(o.audience==='child'?'소아':(o.audience==='adult'?'성인':'나이 모름'))+'</span>':'')+'</td><td>'+esc(tplLabel(o.template))+'</td></tr>' }).join('')
+      +'</tbody></table></div>'
+    $('todayOut').innerHTML=h
+    $('btnTodayList').classList.remove('hidden')
+    postHeight()
+  }
+  $('btnTodayList').addEventListener('click',function(){ var el=$('todayList'); if(el){ el.classList.toggle('hidden'); postHeight() } })
+
+  /* ── 시작 ── */
+  Promise.all([loadTax(),loadCap(),loadV0()]).then(loadRules).then(postHeight)
+  loadRules()
+})()
+</script>

@@ -1,0 +1,538 @@
+<!--
+  #/admin/consents/manual 의 **개발데이터** 화면 — 수술 / 시술 동의서 빌더
+
+  사용자 지시(2026-10-20): 「mediqr.io/admin/consents/manual 을 참고하여 동의서를 생성하는 기능을
+  개발데이터로 동일하게. 덴트웹(OO치과) DB 로 환자 검색·선택 → 어떤 진료인지 선택 →
+  치료 카테고리와 동의서 내용 확인 — **카카오톡 전송 전까지**.」
+
+  흐름(운영 빌더와 같은 3단계 · SIDE_STEPS):
+    STEP 1 환자정보 / 치료요약 — 환자 검색(GET /api-v1/patients/search) → 그 환자의 치료계획
+           (GET /api-v1/patients/:id/treatment-plans)에서 **진료를 고르면** 치아·범위·비용·카테고리를 채운다
+    STEP 2 치료 카테고리 선택 — 12 카테고리 + 세부 유형(번들)
+    STEP 3 동의서 내용 확인 — 고른 카테고리의 STEP 1~4 카드를 합쳐 보여 준다
+    (카카오톡 전송 — 🔴 **이번 범위 밖**. 버튼은 「준비 중」으로 막는다. 눌렀는데 아무 일도 없으면 고장으로 읽힌다.)
+
+  🔴 동의서 문구(카탈로그)는 운영 빌더 **번들에 내장된 것**을 떠 온 동봉 파일이다
+     (`/view-v1/data/consent-catalog.json` · `scripts/scan-mediqr-consent-catalog.mjs`). 환자 정보가 아니다.
+  🔴 **저장하지 않는다** — 입력은 이 창 메모리에만 있다(환자 정보를 브라우저·서버에 남기지 않는다).
+  🔴 덴트웹은 **읽기만** 한다.
+-->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>수술 / 시술 동의서 빌더</title>
+<style>
+  :root{--blue:#2a85ff;--blue-bg:#eef5ff;--line:#e5e7eb;--dim:#6b7280;--ink:#111827;--soft:#f8fafc;--red:#dc2626;--green:#059669}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#f5f6f8;font:14px Pretendard,'Noto Sans KR',system-ui,sans-serif;color:var(--ink)}
+  button{font:inherit;cursor:pointer}
+  .wrap{padding:24px;max-width:1400px;margin:0 auto}
+  .head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .head .clinic{font-size:13px;color:var(--dim);font-weight:700}
+  .head h1{margin:2px 0 4px;font-size:22px;font-weight:800}
+  .head p{margin:0;color:var(--dim);font-size:13.5px}
+  .head .acts{display:flex;gap:8px}
+  .btn{height:44px;border-radius:12px;border:1px solid #d1d5db;background:#fff;color:#4b5563;padding:0 18px;font-weight:700}
+  .btn:hover{border-color:var(--blue);color:var(--blue)}
+  .btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.pri:hover{filter:brightness(.95);color:#fff}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .grid{display:grid;grid-template-columns:280px 1fr;gap:20px;margin-top:20px;align-items:start}
+  @media (max-width:1000px){.grid{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px}
+  .proc h3{margin:0 0 4px;font-size:15px}
+  .proc .sub{font-size:12px;color:var(--dim);margin-bottom:12px;line-height:1.5}
+  .ps{display:flex;gap:10px;padding:10px;border-radius:12px;margin-bottom:6px;cursor:pointer;border:1px solid transparent}
+  .ps .no{flex:0 0 26px;height:26px;border-radius:50%;background:#e5e7eb;color:#6b7280;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:12px}
+  .ps b{display:block;font-size:13.5px}
+  .ps span{font-size:11.5px;color:var(--dim);line-height:1.45}
+  .ps.on{background:var(--blue-bg);border-color:#c9ddff}
+  .ps.on .no{background:var(--blue);color:#fff}
+  .ps.done .no{background:var(--green);color:#fff}
+  .ps.off{cursor:not-allowed;opacity:.55}
+  .stephd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .stephd .t{font-size:18px;font-weight:800}
+  .stephd .n{font-size:12px;color:var(--blue);font-weight:800;letter-spacing:.04em}
+  .sec{border-top:1px solid #f1f2f4;padding-top:16px;margin-top:16px}
+  .sec:first-of-type{border-top:0;padding-top:0;margin-top:0}
+  .sec h4{margin:0 0 8px;font-size:14px}
+  .sec h4 .req{color:var(--red)}
+  .hint{font-size:12px;color:var(--dim);line-height:1.5}
+  .warn{font-size:12px;color:#b45309;background:#fff7e6;border-radius:10px;padding:8px 10px;margin-top:8px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .fld{display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px}
+  .fld label{font-size:12px;color:var(--dim);font-weight:700}
+  input[type=text],input[type=search],textarea{font:inherit;border:1px solid #d1d5db;border-radius:10px;padding:10px 12px;background:#fff;width:100%}
+  input:focus,textarea:focus{outline:2px solid #c9ddff;border-color:var(--blue)}
+  textarea{min-height:84px;resize:vertical;line-height:1.55}
+  .srch{position:relative}
+  .results{margin-top:6px;border:1px solid var(--line);border-radius:12px;max-height:260px;overflow:auto;background:#fff}
+  .results:empty{display:none}
+  .res{display:flex;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid #f4f5f7;cursor:pointer}
+  .res:hover{background:var(--blue-bg)}
+  .res b{min-width:70px}
+  .res .m{font-size:12px;color:var(--dim)}
+  .msg{font-size:12.5px;color:var(--dim);padding:10px 12px}
+  .msg.bad{color:var(--red)}
+  .plans{display:flex;flex-direction:column;gap:8px}
+  .plan{border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;display:flex;gap:10px}
+  .plan:hover{border-color:#c9ddff}
+  .plan.on{border-color:var(--blue);background:var(--blue-bg)}
+  .plan input{margin-top:3px}
+  .plan .pt{font-weight:800}
+  .plan .pm{font-size:12px;color:var(--dim);margin-top:2px}
+  .plan .pi{font-size:12px;color:#374151;margin-top:4px;line-height:1.5}
+  .tag{display:inline-block;font-size:11px;font-weight:800;border-radius:999px;padding:1px 8px;background:#eef2f7;color:#475569;margin-left:6px}
+  .tag.g{background:#e8f8f1;color:var(--green)}
+  .tag.b{background:var(--blue-bg);color:var(--blue)}
+  .teeth{display:grid;grid-template-columns:auto 1fr auto 1fr auto;gap:6px 10px;align-items:center}
+  .teeth .lb{font-size:11px;color:var(--dim);white-space:nowrap}
+  .tq{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+  .th{height:34px;border-radius:8px;border:1px solid #d1d5db;background:#fff;font-weight:700;font-size:12.5px;color:#374151}
+  .th.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{border:1px solid #d1d5db;background:#fff;border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:700;color:#4b5563}
+  .chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .chip.sm{padding:3px 10px;font-size:12px}
+  .grp{font-size:11.5px;color:var(--dim);font-weight:800;margin:10px 0 6px}
+  .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px}
+  .cat{border:1px solid var(--line);border-radius:14px;padding:12px;cursor:pointer;background:#fff;text-align:left}
+  .cat.on{border-color:var(--blue);background:var(--blue-bg)}
+  .cat b{display:block;font-size:14.5px}
+  .cat span{font-size:11.5px;color:var(--dim)}
+  .cat .rec{color:var(--blue);font-weight:800}
+  .bundles{margin-top:14px}
+  .bgrp{border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:10px}
+  .bgrp h5{margin:0 0 8px;font-size:13.5px}
+  .bnd{display:inline-flex;flex-direction:column;align-items:flex-start;border:1px solid #d1d5db;border-radius:12px;padding:7px 12px;margin:0 6px 6px 0;background:#fff;text-align:left}
+  .bnd small{font-size:11px;color:var(--dim);font-weight:500}
+  .bnd.on{border-color:var(--blue);background:var(--blue-bg)}
+  .doc{background:var(--soft);border:1px solid var(--line);border-radius:18px;padding:18px}
+  .doc h3{margin:0;font-size:17px}
+  .doc .dsub{font-size:12.5px;color:var(--dim);margin:4px 0 12px}
+  .sum{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
+  .sum dl{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;margin:0;font-size:13px}
+  .sum dt{color:var(--dim);font-weight:700}
+  .sum dd{margin:0;white-space:pre-wrap}
+  .dstep{margin-top:14px}
+  .dstep h4{margin:0 0 8px;font-size:14px;color:var(--blue)}
+  .dcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+  .dcard .ct{font-weight:800;font-size:13.5px}
+  .dcard .cb{font-size:13px;color:#374151;margin-top:4px;line-height:1.6;white-space:pre-wrap}
+  .dcard .cc{margin-top:6px}
+  .nav{display:flex;justify-content:space-between;align-items:center;margin-top:20px;gap:10px}
+  .nav .pg{font-size:12.5px;color:var(--dim);font-weight:700}
+  .note{font-size:11.5px;color:var(--dim);margin-top:8px}
+  .hidden{display:none!important}
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <div class="clinic" id="clinic">치과</div>
+      <h1>수술 / 시술 동의서 빌더</h1>
+      <p>시술/수술 범위와 비용 범위를 입력, 치료 카테고리를 선택하면 환자 맞춤형 동의서가 생성되고 환자 카카오톡으로 전송할 수 있습니다.</p>
+    </div>
+    <div class="acts"><button class="btn" id="reset">초기화</button></div>
+  </div>
+
+  <div class="grid">
+    <aside class="card proc">
+      <h3>빌더 프로세스</h3>
+      <div class="sub">환자 기본정보 / 치료 요약 → 치료 카테고리 선택 → 동의서 내용 확인 및 생성 → 카카오톡 전송 순으로 진행됩니다.</div>
+      <div id="procList"></div>
+    </aside>
+
+    <section class="card" id="stage"></section>
+  </div>
+</div>
+
+<script>
+'use strict'
+/* ══ 로그인 토큰 자동 첨부 — iframe 독립 문서라 셸 래퍼가 안 닿는다(desk-kiosk-monitor.html 과 같다). */
+;(function(){ /* 🔴 앞의 'use strict' 와 붙으면 호출로 읽힌다 — 세미콜론 필수 */
+  var token=''; try{ token=localStorage.getItem('mw_token')||'' }catch(e){}
+  var orig=window.fetch;
+  function isApi(u){ try{ var x=new URL(u,location.href); return x.origin===location.origin && /^\/(api|api-v0|api-v1|api-v3)\//.test(x.pathname) }catch(e){ return false } }
+  var redir=false;
+  window.fetch=function(input,init){
+    var u=typeof input==='string'?input:(input&&input.url)||'';
+    if(token && isApi(u)){ init=init||{}; var h=new Headers(init.headers||(typeof input!=='string'&&input.headers)||{}); if(!h.has('authorization')) h.set('authorization','Bearer '+token); init.headers=h; if(!init.credentials) init.credentials='same-origin'; }
+    return orig.call(this,input,init).then(function(r){
+      if(r && r.status===401 && isApi(u) && !/\/api\/auth\//.test(u) && !redir){ redir=true; var from=(window.top||window).location.pathname+(window.top||window).location.hash; (window.top||window).location.replace('/login?from='+encodeURIComponent(from)); }
+      return r;
+    });
+  };
+})();
+
+const $ = id => document.getElementById(id)
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const won = n => (Number(n) || 0).toLocaleString('ko-KR') + '원'
+
+/* 운영 빌더의 칩 문구(캡처 화면 그대로). */
+const SCOPE_CHIPS = [
+  ['보철관련', ['크라운', '임플란트 크라운', '세렉', '라미네이트', '레진충전', '신경치료']],
+  ['교정관련', ['전체 교정', '부분 교정', '스플린트', '턱관절']],
+  ['외과관련', ['발치', '사랑니 발치', '뼈(골) 이식', '상악동 거상', '임플란트 식립']],
+  ['임플란트', ['덴티움', '오스템', '스트라우만']],
+  ['기타', ['치료범위: 상악', '치료범위: 하악', '임시치아']],
+]
+const HISTORY_CHIPS = ['고혈압', '고지혈증', '당뇨', '지혈 관련 문제', '임신 가능성', '골다공증', '항응고제 복용', '해당사항이 없습니다.']
+const COST_CHIPS = ['구두로 설명드렸습니다.', '추가 비용 발생 가능', '필요시 지혈제 4만원', '임시치아 별도', '재진료/재제작 비용', '할인이 적용된 금액입니다.']
+const UPPER = [18, 17, 16, 15, 14, 13, 12, 11], UPPER_L = [21, 22, 23, 24, 25, 26, 27, 28]
+const LOWER = [48, 47, 46, 45, 44, 43, 42, 41], LOWER_L = [31, 32, 33, 34, 35, 36, 37, 38]
+
+/* 🔴 진료명 → 카테고리 **추천**(고르지는 않는다 — 직원이 STEP 2 에서 정한다).
+   덴트웹 진료명 키워드로. 못 가리면 추천 없음(지어내지 않는다). 순서 = 우선. */
+const CAT_KEYWORDS = [
+  ['implant', ['임플란트', 'implant', 'fixture', '식립', '상악동', 'sinus', '골이식', 'gbr', '오스템', 'osstem', '덴티움', 'dentium', '스트라우만', 'straumann', '메가젠', 'megagen']],   // 수가표에 브랜드명만 있는 경우(실측: 「오스템BA이벤트」)
+  ['wisdom', ['사랑니', '매복']],
+  ['extraction', ['발치', 'ext']],
+  ['endo', ['신경', '근관', 'endo', 'rct', '발수']],
+  ['crownBridge', ['크라운', 'crown', '브릿지', 'bridge', 'pfm', '지르코니아', 'zirconia', 'gold', '골드', 'inlay', '인레이', 'onlay']],
+  ['esthetic', ['라미네이트', 'laminate', '세렉', 'cerec', '심미']],
+  ['caries', ['레진', 'resin', '충치', 'gi ', 'amalgam', '아말감']],
+  ['perio', ['잇몸', '치주', 'srp', '스케일링', 'scaling', '치근활택', '소파술']],
+  ['ortho', ['교정', 'ortho', '브라켓', '투명교정']],
+  ['denture', ['틀니', '의치', 'denture', '덴쳐']],
+  ['whitening', ['미백', 'bleach', 'whitening']],
+  ['tmj', ['스플린트', 'splint', '턱관절', 'tmj']],
+]
+function suggestCats(text) {
+  const t = String(text || '').toLowerCase()
+  return CAT_KEYWORDS.filter(([, kws]) => kws.some(k => t.includes(k.toLowerCase()))).map(([k]) => k)
+}
+
+let CAT = null           // consent-catalog.json
+const S = {
+  step: 0,
+  q: '', results: [], searching: false, searchMsg: '',
+  patient: null,         // {patientId,name,chartNumber,phone,birthDate,age}
+  name: '', phone: '', chart: '',
+  plans: null, plansMsg: '', planId: null,   // planId: 'manual' = 직접 입력
+  teeth: new Set(),
+  scope: '', history: new Set(), historyText: '', cost: '',
+  costChips: new Set(),
+  cats: [],              // 고른 카테고리 키(순서 유지)
+  bundles: {},           // cat → Set(bundleKey)
+  suggested: [],
+}
+
+function resetAll() {
+  Object.assign(S, { step: 0, q: '', results: [], searching: false, searchMsg: '', patient: null, name: '', phone: '', chart: '',
+    plans: null, plansMsg: '', planId: null, teeth: new Set(), scope: '', history: new Set(), historyText: '', cost: '',
+    costChips: new Set(), cats: [], bundles: {}, suggested: [] })
+  render()
+}
+
+/* ── 단계 목록(좌측) ── */
+function renderProc() {
+  const steps = (CAT && CAT.sideSteps && CAT.sideSteps.length ? CAT.sideSteps : [
+    { title: '환자정보 / 치료요약' }, { title: '치료 카테고리 선택' }, { title: '동의서 내용 확인 및 생성' }])
+  const list = steps.map((s, i) => ({ title: s.title, desc: s.desc || '' }))
+  list.push({ title: '카카오톡 전송', desc: '동의서 생성 완료 후 템플릿 선택 및 전송을 진행합니다. (준비 중)', off: true })
+  $('procList').innerHTML = list.map((s, i) => {
+    const cls = s.off ? 'off' : i === S.step ? 'on' : i < S.step ? 'done' : ''
+    return '<div class="ps ' + cls + '" data-go="' + (s.off ? '' : i) + '"><div class="no">' + (i < S.step && !s.off ? '✓' : i + 1) + '</div>'
+      + '<div><b>' + esc(s.title) + '</b><span>' + esc(s.desc) + '</span></div></div>'
+  }).join('')
+  $('procList').querySelectorAll('.ps[data-go]').forEach(el => el.addEventListener('click', () => {
+    const g = el.dataset.go; if (g === '') return
+    const n = Number(g); if (n > S.step && !canNext(S.step)) return
+    S.step = n; render()
+  }))
+}
+
+function canNext(step) {
+  if (step === 0) return !!(S.name.trim() && S.phone.trim() && S.scope.trim())
+  if (step === 1) return S.cats.length > 0
+  return false
+}
+
+/* ── STEP 1 ── */
+function step1HTML() {
+  const res = S.searching ? '<div class="msg">찾는 중…</div>'
+    : S.searchMsg ? '<div class="msg' + (/실패|못/.test(S.searchMsg) ? ' bad' : '') + '">' + esc(S.searchMsg) + '</div>'
+    : S.results.map((p, i) => '<div class="res" data-i="' + i + '"><b>' + esc(p.name) + '</b>'
+        + '<span class="m">#' + esc(p.chartNumber || '—') + ' · ' + esc(p.birthDate || '생일 없음') + ' · 최근 ' + esc(p.lastVisitDate || '—') + '</span></div>').join('')
+  const toothBtns = arr => '<div class="tq">' + arr.map(t => '<button type="button" class="th' + (S.teeth.has(t) ? ' on' : '') + '" data-t="' + t + '">' + t + '</button>').join('') + '</div>'
+  let plans = ''
+  if (S.patient) {
+    if (S.plans == null) plans = '<div class="msg">' + esc(S.plansMsg || '치료계획 불러오는 중…') + '</div>'
+    else {
+      const items = S.plans.map(p => {
+        const its = (p.items || []).map(i => esc(i.name || '?') + ((i.teeth || []).length ? ' #' + i.teeth.join(',') : '')).join(' · ')
+        const sug = suggestCats([p.name].concat((p.items || []).map(i => i.name)).join(' '))
+        return '<label class="plan' + (S.planId === p.planId ? ' on' : '') + '"><input type="radio" name="plan" value="' + esc(p.planId) + '"' + (S.planId === p.planId ? ' checked' : '') + '>'
+          + '<div><div class="pt">' + esc(p.name || '치료계획') + '<span class="tag' + (p.status === 3 ? ' g' : p.status === 2 ? ' b' : '') + '">' + esc(p.statusLabel || '') + '</span></div>'
+          + '<div class="pm">' + esc(String(p.writtenAt || '').slice(0, 10)) + ' · ' + won(p.actualAmount) + (sug.length ? ' · 추천: ' + esc(sug.map(catLabel).join(', ')) : '') + '</div>'
+          + (its ? '<div class="pi">' + its + '</div>' : '') + '</div></label>'
+      }).join('')
+      plans = (S.plansMsg ? '<div class="msg bad">' + esc(S.plansMsg) + '</div>' : '')
+        + (items || (S.plansMsg ? '' : '<div class="msg">덴트웹에 이 환자의 치료계획이 없습니다 — 직접 입력을 고르세요.</div>'))
+        + '<label class="plan' + (S.planId === 'manual' ? ' on' : '') + '"><input type="radio" name="plan" value="manual"' + (S.planId === 'manual' ? ' checked' : '') + '>'
+        + '<div><div class="pt">직접 입력</div><div class="pm">치료계획 없이 아래 칸을 직접 채웁니다.</div></div></label>'
+    }
+  }
+  return '<div class="stephd"><div class="t">환자 정보 입력</div><div class="n">STEP 1 / 3</div></div>'
+    + '<div class="sec"><h4>환자 검색 <span class="req">*</span></h4>'
+    + '<div class="srch"><input type="search" id="q" placeholder="이름 · 차트번호 · 전화번호로 덴트웹 환자 검색" value="' + esc(S.q) + '" autocomplete="off"></div>'
+    + '<div class="results" id="results">' + res + '</div>'
+    + '<div class="row" style="margin-top:10px">'
+    + '<div class="fld"><label>환자명 *</label><input type="text" id="fName" value="' + esc(S.name) + '"></div>'
+    + '<div class="fld"><label>연락처 *</label><input type="text" id="fPhone" value="' + esc(S.phone) + '"></div>'
+    + '<div class="fld"><label>차트번호</label><input type="text" id="fChart" value="' + esc(S.chart) + '"></div></div>'
+    + '<div class="warn">환자명과 환자의 연락처를 확인하고 작성 바랍니다. 잘못된 연락처는 환자가 아닌 다른 분에게 전달되니 주의 바랍니다.</div></div>'
+    + (S.patient ? '<div class="sec"><h4>진료 선택 <span class="req">*</span></h4><div class="hint" style="margin-bottom:8px">덴트웹 치료계획에서 이번 동의서의 진료를 고르면 치아·범위·비용과 카테고리 추천이 채워집니다.</div><div class="plans">' + plans + '</div></div>' : '')
+    + '<div class="sec"><h4>치료 범위 (치아 선택 및 상세 내용 작성)</h4>'
+    + '<div class="hint" style="margin-bottom:8px">선택된 치아: <b>' + S.teeth.size + '</b> — 「치료대상:」 라인에 자동으로 주입됩니다.</div>'
+    + '<div class="teeth"><span class="lb">환자 기준 오른쪽 (Right)</span>' + toothBtns(UPPER) + '<span class="lb">|</span>' + toothBtns(UPPER_L) + '<span class="lb">환자 기준 왼쪽 (Left)</span>'
+    + '<span class="lb">40번대</span>' + toothBtns(LOWER) + '<span class="lb">|</span>' + toothBtns(LOWER_L) + '<span class="lb">30번대</span></div>'
+    + '<div class="chips" style="margin-top:8px"><button type="button" class="chip sm" data-tall="all">치아 모두 선택</button><button type="button" class="chip sm" data-tall="up">상악 전체</button><button type="button" class="chip sm" data-tall="low">하악 전체</button><button type="button" class="chip sm" data-tall="none">선택 해제</button></div></div>'
+    + '<div class="sec"><h4>치료 범위 / 상세 내용 <span class="req">*</span> <button type="button" class="chip sm" data-clear="scope" style="margin-left:6px">다시 작성</button></h4>'
+    + SCOPE_CHIPS.map(([g, list]) => '<div class="grp">' + esc(g) + '</div><div class="chips">' + list.map(c => '<button type="button" class="chip" data-scope="' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>').join('')
+    + '<textarea id="fScope" style="margin-top:10px" placeholder="치료 범위와 상세 내용을 적거나 위 칩을 누르세요">' + esc(S.scope) + '</textarea></div>'
+    + '<div class="sec"><h4>전신질환 내역 (복용약 포함) <button type="button" class="chip sm" data-clear="history" style="margin-left:6px">다시 작성</button></h4>'
+    + '<div class="chips">' + HISTORY_CHIPS.map(c => '<button type="button" class="chip' + (S.history.has(c) ? ' on' : '') + '" data-hist="' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>'
+    + '<textarea id="fHist" style="margin-top:10px;min-height:56px" placeholder="추가로 적을 내용">' + esc(S.historyText) + '</textarea></div>'
+    + '<div class="sec"><h4>치료 비용 <span class="req">*</span> <button type="button" class="chip sm" data-clear="cost" style="margin-left:6px">다시 작성</button></h4>'
+    + '<div class="chips">' + COST_CHIPS.map(c => '<button type="button" class="chip' + (S.costChips.has(c) ? ' on' : '') + '" data-cost="' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>'
+    + '<textarea id="fCost" style="margin-top:10px;min-height:56px" placeholder="치료 비용: 0원">' + esc(S.cost) + '</textarea></div>'
+}
+
+/* ── STEP 2 ── */
+const catLabel = k => ((CAT && CAT.categories || []).find(c => c.key === k) || {}).label || k
+function step2HTML() {
+  const cats = (CAT && CAT.categories) || []
+  const grid = cats.map(c => {
+    const on = S.cats.includes(c.key)
+    const rec = S.suggested.includes(c.key)
+    const n = ['step1', 'step2', 'step3', 'step4'].reduce((m, s) => m + (c.steps[s].standard || []).length, 0)
+    return '<button type="button" class="cat' + (on ? ' on' : '') + '" data-cat="' + esc(c.key) + '"><b>' + esc(c.label) + '</b>'
+      + '<span>' + (rec ? '<span class="rec">추천 · </span>' : '') + '표준 카드 ' + n + '장 · 세부 유형 ' + c.bundles.length + '</span></button>'
+  }).join('')
+  const bundles = S.cats.map(k => {
+    const c = cats.find(x => x.key === k); if (!c || !c.bundles.length) return ''
+    const sel = S.bundles[k] || new Set()
+    return '<div class="bgrp"><h5>' + esc(c.label) + ' — 세부 유형 <span class="hint">(해당하는 것을 고르면 관련 추가 안내 카드가 들어갑니다)</span></h5>'
+      + c.bundles.map(b => '<button type="button" class="bnd' + (sel.has(b.key) ? ' on' : '') + '" data-bcat="' + esc(k) + '" data-bnd="' + esc(b.key) + '">'
+        + '<b>' + esc(b.label) + '</b><small>' + esc(b.target || '') + '</small></button>').join('') + '</div>'
+  }).join('')
+  return '<div class="stephd"><div class="t">치료 카테고리 선택</div><div class="n">STEP 2 / 3</div></div>'
+    + '<div class="hint" style="margin-bottom:12px">수술 및 시술 카테고리를 고릅니다(여러 개 가능). ' + (S.suggested.length ? '<b style="color:var(--blue)">추천</b>은 고른 진료(' + esc(planName()) + ')의 진료명으로 붙였습니다 — 확인 후 고르세요.' : '') + '</div>'
+    + '<div class="cats">' + grid + '</div>'
+    + (S.cats.length ? '<div class="bundles">' + bundles + '</div>' : '')
+}
+function planName() {
+  if (S.planId === 'manual') return '직접 입력'
+  const p = (S.plans || []).find(x => x.planId === S.planId)
+  return p ? (p.name || '치료계획') : ''
+}
+
+/* ── STEP 3 — 카드 합치기(운영 renderSurgeryPreview 와 같은 규칙) ──
+   카테고리마다 STEP 1~4 의 **표준 카드** + STEP 2 에 세부 유형의 **추가 카드**(presetAdditionalCardIds).
+   같은 제목·본문은 한 장으로 합치고 어느 카테고리에서 왔는지 꼬리표를 모은다. */
+function buildDoc() {
+  const steps = (CAT && CAT.surgerySteps) || []
+  const merged = {}
+  steps.forEach(s => { merged[s.key] = [] })
+  S.cats.forEach(k => {
+    const c = (CAT.categories || []).find(x => x.key === k); if (!c) return
+    const all = new Map()
+    Object.values(c.steps).forEach(st => [...(st.standard || []), ...(st.additional || [])].forEach(card => { if (card && card.id && !all.has(card.id)) all.set(card.id, card) }))
+    const extraIds = []
+    ;(S.bundles[k] ? Array.from(S.bundles[k]) : []).forEach(bk => {
+      const b = c.bundles.find(x => x.key === bk); if (b) extraIds.push(...(b.presetAdditionalCardIds || []))
+    })
+    steps.forEach(s => {
+      const base = (c.steps[s.key] && c.steps[s.key].standard) || []
+      const extra = s.key === 'step2' ? Array.from(new Set(extraIds)).map(id => all.get(id)).filter(Boolean) : []
+      ;[...base, ...extra].forEach(card => {
+        const sig = String(card.title || '').trim() + '||' + String(card.body || '').trim()
+        const hit = merged[s.key].find(m => m.__sig === sig)
+        if (hit) { if (!hit.__cats.includes(c.label)) hit.__cats.push(c.label); return }
+        merged[s.key].push(Object.assign({}, card, { __sig: sig, __cats: [c.label] }))
+      })
+    })
+  })
+  return { steps, merged }
+}
+function teethLine() {
+  const t = Array.from(S.teeth).sort((a, b) => a - b)
+  return t.length ? '#' + t.join(', #') : '—'
+}
+function step3HTML() {
+  const { steps, merged } = buildDoc()
+  const hist = [...Array.from(S.history), S.historyText.trim()].filter(Boolean).join(', ') || '—'
+  const cost = [S.cost.trim(), ...Array.from(S.costChips)].filter(Boolean).join('\n') || '—'
+  const total = steps.reduce((n, s) => n + merged[s.key].length, 0)
+  return '<div class="stephd"><div class="t">동의서 내용 확인 및 생성</div><div class="n">STEP 3 / 3</div></div>'
+    + '<div class="doc"><h3>메인 수술 / 시술 동의서 — ' + esc(S.cats.map(catLabel).join(' · ')) + '</h3>'
+    + '<div class="dsub">선택된 카테고리의 내용을 하나로 합쳐, STEP 1~4 순서로 보여줍니다. (카드 ' + total + '장)</div>'
+    + '<div class="sum"><dl>'
+    + '<dt>환자</dt><dd>' + esc(S.name) + (S.chart ? ' (#' + esc(S.chart) + ')' : '') + ' · ' + esc(S.phone) + '</dd>'
+    + '<dt>진료</dt><dd>' + esc(planName() || '—') + '</dd>'
+    + '<dt>치료대상</dt><dd>' + esc(teethLine()) + '</dd>'
+    + '<dt>치료 범위</dt><dd>' + esc(S.scope || '—') + '</dd>'
+    + '<dt>전신질환</dt><dd>' + esc(hist) + '</dd>'
+    + '<dt>치료 비용</dt><dd>' + esc(cost) + '</dd>'
+    + '</dl></div>'
+    + steps.map(s => '<div class="dstep"><h4>' + esc(s.label) + '</h4>'
+      + (merged[s.key].length ? merged[s.key].map(c => '<div class="dcard"><div class="ct">' + esc(c.title) + '</div><div class="cb">' + esc(c.body) + '</div>'
+        + '<div class="cc">' + c.__cats.map(l => '<span class="tag b" style="margin-left:0;margin-right:4px">' + esc(l) + '</span>').join('') + '</div></div>').join('')
+        : '<div class="hint">이 단계에 들어갈 카드가 없습니다.</div>') + '</div>').join('')
+    + '</div>'
+    + '<div class="note">동의서 문구 출처: 운영 동의서 빌더 카탈로그(' + esc(String(CAT.fetchedAt || '').slice(0, 10)) + ' 기준, 동봉본). 이 화면은 입력을 저장하지 않습니다.</div>'
+}
+
+/* ── 렌더 ── */
+function render() {
+  renderProc()
+  if (!CAT) { $('stage').innerHTML = '<div class="msg">동의서 카탈로그 불러오는 중…</div>'; return }
+  const body = S.step === 0 ? step1HTML() : S.step === 1 ? step2HTML() : step3HTML()
+  const next = S.step < 2
+    ? '<button class="btn pri" id="next"' + (canNext(S.step) ? '' : ' disabled') + '>다음</button>'
+    : '<button class="btn pri" id="send" disabled title="카카오톡 전송은 준비 중입니다">카카오톡 전송 (준비 중)</button>'
+  const why = S.step === 0 && !canNext(0) ? '환자명 · 연락처 · 치료 범위를 채우면 다음으로 갑니다.'
+    : S.step === 1 && !canNext(1) ? '카테고리를 하나 이상 고르세요.' : ''
+  $('stage').innerHTML = body
+    + '<div class="nav"><button class="btn" id="prev"' + (S.step === 0 ? ' disabled' : '') + '>이전</button>'
+    + '<span class="pg">' + (S.step + 1) + ' / 3' + (why ? ' · ' + esc(why) : '') + '</span>' + next + '</div>'
+  wire()
+}
+
+let searchT = 0
+function wire() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn) }
+  on('prev', 'click', () => { S.step = Math.max(0, S.step - 1); render() })
+  on('next', 'click', () => { if (canNext(S.step)) { S.step++; render(); window.scrollTo(0, 0) } })
+  if (S.step === 0) {
+    on('q', 'input', e => { S.q = e.target.value; clearTimeout(searchT); searchT = setTimeout(doSearch, 300) })
+    on('q', 'keydown', e => { if (e.key === 'Enter') { clearTimeout(searchT); doSearch() } })
+    document.querySelectorAll('#results .res').forEach(el => el.addEventListener('click', () => pickPatient(S.results[Number(el.dataset.i)])))
+    const bind = (id, key) => on(id, 'input', e => { S[key] = e.target.value; refreshNav() })
+    bind('fName', 'name'); bind('fPhone', 'phone'); bind('fChart', 'chart'); bind('fScope', 'scope'); bind('fHist', 'historyText'); bind('fCost', 'cost')
+    document.querySelectorAll('input[name=plan]').forEach(r => r.addEventListener('change', () => pickPlan(r.value)))
+    document.querySelectorAll('.th[data-t]').forEach(b => b.addEventListener('click', () => {
+      const t = Number(b.dataset.t); S.teeth.has(t) ? S.teeth.delete(t) : S.teeth.add(t); render()
+    }))
+    document.querySelectorAll('[data-tall]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.tall
+      if (k === 'none') S.teeth = new Set()
+      else (k === 'all' ? [...UPPER, ...UPPER_L, ...LOWER, ...LOWER_L] : k === 'up' ? [...UPPER, ...UPPER_L] : [...LOWER, ...LOWER_L]).forEach(t => S.teeth.add(t))
+      render()
+    }))
+    document.querySelectorAll('[data-scope]').forEach(b => b.addEventListener('click', () => {
+      S.scope = (S.scope.trim() ? S.scope.trim() + ', ' : '') + b.dataset.scope; render()
+    }))
+    document.querySelectorAll('[data-hist]').forEach(b => b.addEventListener('click', () => {
+      const v = b.dataset.hist
+      if (v.startsWith('해당사항')) S.history = S.history.has(v) ? new Set() : new Set([v])
+      else { S.history.delete('해당사항이 없습니다.'); S.history.has(v) ? S.history.delete(v) : S.history.add(v) }
+      render()
+    }))
+    document.querySelectorAll('[data-cost]').forEach(b => b.addEventListener('click', () => {
+      const v = b.dataset.cost; S.costChips.has(v) ? S.costChips.delete(v) : S.costChips.add(v); render()
+    }))
+    document.querySelectorAll('[data-clear]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.clear
+      if (k === 'scope') S.scope = ''
+      if (k === 'history') { S.history = new Set(); S.historyText = '' }
+      if (k === 'cost') { S.cost = ''; S.costChips = new Set() }
+      render()
+    }))
+  }
+  if (S.step === 1) {
+    document.querySelectorAll('.cat[data-cat]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.cat
+      if (S.cats.includes(k)) { S.cats = S.cats.filter(x => x !== k); delete S.bundles[k] } else S.cats.push(k)
+      render()
+    }))
+    document.querySelectorAll('.bnd[data-bnd]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.bcat, bk = b.dataset.bnd
+      const set = S.bundles[k] || (S.bundles[k] = new Set())
+      set.has(bk) ? set.delete(bk) : set.add(bk); render()
+    }))
+  }
+}
+/* 입력 중엔 다시 그리지 않는다(포커스·커서가 날아간다) — 하단 「다음」 버튼만 갱신. */
+function refreshNav() {
+  const n = $('next'); if (n) n.disabled = !canNext(S.step)
+}
+
+async function doSearch() {
+  const q = S.q.trim()
+  if (!q) { S.results = []; S.searchMsg = ''; render(); refocus(); return }
+  S.searching = true; S.searchMsg = ''; render(); refocus()
+  try {
+    const r = await fetch('/api-v1/patients/search?q=' + encodeURIComponent(q), { headers: { accept: 'application/json' } })
+    const j = await r.json().catch(() => null)
+    if (!r.ok) throw new Error((j && (j.message || j.error)) || ('HTTP ' + r.status))
+    S.results = (j && j.items) || []
+    S.searchMsg = S.results.length ? '' : '덴트웹에서 「' + q + '」 환자를 찾지 못했습니다.'
+  } catch (e) {
+    S.results = []; S.searchMsg = '조회 실패 — ' + ((e && e.message) || '') + ' (덴트웹 연결을 확인하세요)'
+  }
+  S.searching = false; render(); refocus()
+}
+function refocus() { const q = $('q'); if (q) { q.focus(); const n = q.value.length; q.setSelectionRange(n, n) } }
+
+async function pickPatient(p) {
+  if (!p) return
+  Object.assign(S, { patient: p, name: p.name || '', phone: p.phone || '', chart: p.chartNumber || '', results: [], q: '',
+    plans: null, plansMsg: '', planId: null, suggested: [] })
+  render()
+  try {
+    const r = await fetch('/api-v1/patients/' + encodeURIComponent(p.patientId) + '/treatment-plans', { headers: { accept: 'application/json' } })
+    const j = await r.json().catch(() => null)
+    if (!r.ok) throw new Error((j && (j.message || j.error)) || ('HTTP ' + r.status))
+    if (S.patient !== p) return
+    S.plans = (j && j.plans) || []
+    if (j && j.patient && j.patient.phone && !S.phone) S.phone = j.patient.phone
+  } catch (e) {
+    if (S.patient !== p) return
+    S.plansMsg = '치료계획 조회 실패 — ' + ((e && e.message) || '') + ' · 직접 입력으로 진행할 수 있습니다.'
+    S.plans = []
+  }
+  render()
+}
+
+/* 진료(치료계획)를 고르면 치아·범위·비용을 채우고 카테고리를 **추천**한다(고르지는 않는다). */
+function pickPlan(v) {
+  if (v === 'manual') { S.planId = 'manual'; S.suggested = []; render(); return }
+  const p = (S.plans || []).find(x => String(x.planId) === String(v)); if (!p) return
+  S.planId = p.planId
+  const teeth = new Set(); (p.items || []).forEach(i => (i.teeth || []).forEach(t => teeth.add(Number(t))))
+  S.teeth = teeth
+  const names = Array.from(new Set((p.items || []).map(i => i.name).filter(Boolean)))
+  S.scope = names.length ? names.join(', ') : (p.name || '')
+  S.cost = '치료 비용: ' + won(p.actualAmount)
+  S.suggested = suggestCats([p.name].concat(names).join(' '))
+  // 아직 아무 카테고리도 안 골랐을 때만 추천을 미리 켠다 — 직원이 고른 것은 덮지 않는다.
+  if (!S.cats.length) S.cats = S.suggested.slice()
+  render()
+}
+
+$('reset').addEventListener('click', () => { if (confirm('입력한 내용을 모두 지울까요?')) resetAll() })
+
+;(async function init() {
+  render()
+  try {
+    const j = await (await fetch('/api-v1/kiosk/clinic')).json()
+    const n = j && j.ok && j.data && j.data.name; if (n) $('clinic').textContent = n
+  } catch (_) {}
+  try {
+    CAT = await (await fetch('/view-v1/data/consent-catalog.json')).json()
+  } catch (e) {
+    $('stage').innerHTML = '<div class="msg bad">동의서 카탈로그를 불러오지 못했습니다 — /view-v1/data/consent-catalog.json</div>'
+    return
+  }
+  render()
+})()
+/* 셸(iframe 부모)에 높이를 알린다 — 고정 높이면 안쪽 스크롤로 잘린다. */
+;(function () {
+  let last = 0
+  const post = () => { try { const h = Math.ceil(document.documentElement.scrollHeight); if (h !== last) { last = h; parent.postMessage({ type: 'consent-manual-height', h }, '*') } } catch (_) {} }
+  new ResizeObserver(post).observe(document.body); setInterval(post, 800)
+})()
+</script>

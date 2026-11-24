@@ -1,0 +1,270 @@
+/* 뷰어통합 껍데기 — 🔴 **최소만** 둔다.
+   화면 모양은 원본 `shell.css`(425KB, Tailwind 캡처)와 런타임이 만든다.
+   여기서 레이아웃을 더 얹으면 원본과 어긋난다(2026-10-13 실측으로 배운 것). */
+
+/* 원본과 같은 바탕 — body 가 투명하면 캡처 화면이 떠 보인다. */
+body { margin: 0; background: #f5f6f8; }
+main.h-full { min-height: 100vh; }
+
+/* ── 데이터 레인 토글 — 🔴 **헤더 우측**(사용자 지시 2026-10-13) ──
+   ⚠️ 화면을 옮기면 헤더가 통째로 다시 깔린다. view.js 가 매 렌더마다
+      「없으면 다시 꽂는다」 — 한 번만 꽂으면 조용히 사라진다. */
+.vv-modes {
+  display: inline-flex; align-items: center; margin-right: 12px;
+  border: 1px solid #e3e6eb; border-radius: 9px; overflow: hidden;
+  background: #fff; vertical-align: middle;
+  font: 600 11.5px Pretendard, -apple-system, system-ui, sans-serif;
+}
+.vv-mode {
+  border: 0; background: none; color: #6b7280; cursor: pointer;
+  padding: 6px 11px; font: inherit; white-space: nowrap;
+}
+.vv-mode + .vv-mode { border-left: 1px solid #eef0f3; }
+.vv-mode:hover { background: #f7f8fa; }
+/* 🔴 켜진 쪽을 분명히 — 어느 데이터를 보는지 헷갈리면 비교가 의미 없다. */
+.vv-mode.on { background: #2a85ff; color: #fff; }
+/* 켜진 쪽이 안 보이면 어느 데이터인지 헷갈려 비교가 의미 없다. */
+/* 전환 중에는 토글을 **못 누르게** 한다 — 연타하면 조회가 겹쳐 마지막 것이
+   먼저 끝나는 순서 역전이 난다(화면과 토글이 어긋난다). */
+body:has(#vvBusy[data-on]) .vv-mode { pointer-events: none; opacity: .55; }
+
+/* ═══ 모드 전환 중 표시 (2026-10-14 사용자 지시) ═══
+ *
+ * 🔴 **왜 필요한가** — 토글을 눌러도 바뀌는지 알 수 없었다. 전환은 되는데 그
+ *    사이가 비어 있어 「눌린 건가 고장인가」가 구분되지 않았다.
+ * 🔴 화면을 **가리지 않는다.** 전체를 덮으면 「뭐가 바뀌었나」를 비교할 수 없다 —
+ *    아주 옅은 막만 씌우고 가운데 카드로 진행을 알린다.
+ * ⚠️ `main` 안에 두지 않는다. 원본 런타임이 `main` 을 통째로 갈아끼우므로
+ *    그 안에 있으면 그리는 순간 사라진다. 그래서 `position: fixed` 다.
+ */
+#vvBusy {
+  position: fixed; inset: 0; z-index: 9999;
+  display: none; align-items: center; justify-content: center;
+  /* 아주 옅은 막 — 「지금은 손대는 중」이라는 신호만 준다. */
+  background: rgba(248, 250, 252, .55);
+  backdrop-filter: blur(1.5px);
+  /* 🔴 **클릭을 삼키지 않는다**(사용자 보고 2026-10-20). inset:0 전체막이라
+     pointer-events 를 안 끄면, 개발데이터로 바꾼 뒤 조회가 끝날 때까지(덴트웹은
+     느려 수초) 좌측 탭 클릭이 **이 막에 먹혀** 아무 데도 못 가고 홈에 남는다 —
+     사용자에겐 「탭을 눌러도 홈으로 돌아간다」로 보였다. 막은 **시각 신호뿐**이고
+     안에 누를 것이 없으니 통째로 통과시킨다. */
+  pointer-events: none;
+}
+#vvBusy[data-on] { display: flex; animation: vvb-in .14s ease-out; }
+@keyframes vvb-in { from { opacity: 0 } to { opacity: 1 } }
+
+#vvBusy .vvb-card {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: #0f172a; color: #e2e8f0;
+  padding: 12px 18px; border-radius: 12px;
+  font: 600 13px Pretendard, -apple-system, system-ui, sans-serif;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .25);
+}
+#vvBusy .vvb-spin {
+  width: 15px; height: 15px; flex: none; border-radius: 50%;
+  border: 2px solid rgba(226, 232, 240, .28);
+  border-top-color: #60a5fa;
+  animation: vvb-spin .62s linear infinite;
+}
+@keyframes vvb-spin { to { transform: rotate(360deg) } }
+
+/* ⚠️ 「동작 줄이기」를 켠 사용자에겐 회전을 멈춘다 — 전정기관이 예민한 사람에게
+      끊임없는 회전은 어지럼을 준다. 글자만으로도 뜻은 전해진다. */
+@media (prefers-reduced-motion: reduce) {
+  #vvBusy .vvb-spin { animation: none; border-top-color: #60a5fa; }
+  #vvBusy[data-on] { animation: none; }
+}
+
+/* ── 🔴 VIBECODING 업로드물은 **화면 전체**를 쓴다 (사용자 지시 2026-10-13) ────
+ *
+ * 올린 HTML 은 **그 자체로 완성된 화면**이다. 옆에 모닝 메뉴(헤더·좌측탭)가
+ * 붙어 있으면 업로드한 페이지의 레이아웃이 밀리고, 쓰는 사람은
+ * 「이게 내 페이지인가」로 헷갈린다.
+ *
+ * ⚠️ **지우지 않고 숨긴다.** 런타임이 `.side-nav`·`header` 를 **찾아서 교체**하는
+ *    구조라, 지우면 다른 화면으로 나갔을 때 메뉴가 **영영 안 돌아온다**
+ *    (이 저장소에서 두 번 난 사고다). `show()` 가 다른 라우트로 가면
+ *    `vv-bare` 를 떼어 **원래대로 되돌린다**.
+ */
+body.vv-bare header,
+body.vv-bare .side-nav,
+body.vv-bare .header-action,
+body.vv-bare aside {
+  display: none !important;
+}
+
+/* ═══ 좌측 탭을 접었을 때 **아이콘 x 를 한 줄로** 맞춘다 (사용자 지시 2026-10-15) ═══
+ *
+ * 「= 누르면 좌측 탭이 최소화 될 때 **추가/수정 아래에 있는 목록 아이콘만** 다른
+ *  아이콘들에 비해 우측으로 조금 이동해 있습니다. 모두 동일한 정렬 위치로」
+ *
+ * 🔴 **원인**(실측): 접힘 상태에서 둘 다 `justify-content:center` · `padding:12px` ·
+ *    아이콘 래퍼 24px 로 **같은데**, 서브탭(`.menu-item`)에만 `column-gap:8px` 가 있다.
+ *    그 gap 이 뒤따르는 빈 라벨 칸을 밀어내며 아이콘을 **왼쪽으로 4px** 당긴다.
+ *      서브탭(.menu-item)          아이콘 x = 128.5
+ *      제목탭(.menu-collapse-item) 아이콘 x = 132.5   ← 4px 오른쪽
+ *
+ * ⚠️ 이건 내가 만든 그룹만의 문제가 아니다 — **원본 마케팅 그룹도 132.5** 다.
+ *    원래부터 제목탭과 서브탭이 4px 어긋나 있었고, 「목록」을 제목탭으로 만들면서
+ *    `추가/수정`(서브탭) 바로 아래 붙어 **눈에 띄게** 된 것이다.
+ *
+ * → 접힘 상태에서 **라벨·꺾쇠를 아예 자리에서 빼고**(width:0) gap 을 지워
+ *   양쪽 모두 아이콘만 가운데 오게 한다. 펼친 상태는 건드리지 않는다.
+ */
+.side-nav.mq-side-collapsed .menu-item,
+.side-nav.mq-side-collapsed .menu-collapse-item {
+  column-gap: 0 !important;
+  gap: 0 !important;
+  justify-content: center !important;
+}
+/* 제목탭의 꺾쇠(▼)는 접으면 숨긴다 — 자리를 차지하면 아이콘이 밀린다. */
+.side-nav.mq-side-collapsed .menu-collapse-item > span:last-child {
+  display: none !important;
+}
+/* 라벨 글자는 접힘 상태에서 **자리를 차지하지 않게** 한다. */
+.side-nav.mq-side-collapsed .menu-item a > span,
+.side-nav.mq-side-collapsed .menu-collapse-item span > span:last-child {
+  display: none !important;
+}
+
+/* ── 전자 동의서 상세 패널(admin/consents/list 행 클릭) ──────────────────────
+   🔴 사용자 지시 2026-10-20 — 행을 누르면 동의서 내용(전자서명 구조화 / 스캔 이미지)을
+   오른쪽에서 밀려 나오는 패널로 띄운다. wireConsentsList(legacy-runtime.js)가 연다. */
+.consent-list-clickable tbody tr { cursor: pointer; }
+.consent-list-clickable tbody tr:hover { background: #f1f5fb; }
+#consent-detail { position: fixed; inset: 0; z-index: 10000; display: none; }
+#consent-detail.on { display: block; }
+#consent-detail .cd-back { position: absolute; inset: 0; background: rgba(15,23,42,.38); opacity: 0; transition: opacity .18s; }
+#consent-detail.on .cd-back { opacity: 1; }
+#consent-detail .cd-card {
+  position: absolute; top: 0; right: 0; height: 100%; width: min(560px, 94vw);
+  background: #fff; box-shadow: -8px 0 40px rgba(15,23,42,.22);
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .2s ease-out;
+  font: 14px Pretendard, -apple-system, system-ui, sans-serif;
+}
+#consent-detail.on .cd-card { transform: translateX(0); }
+#consent-detail .cd-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 10px; border-bottom: 1px solid #eef1f5; }
+#consent-detail .cd-ttl { font-size: 18px; font-weight: 800; letter-spacing: -.3px; color: #1b1f26; }
+#consent-detail .cd-sub { font-size: 13px; font-weight: 600; color: #8b95a1; margin-left: 4px; }
+#consent-detail .cd-x { margin-left: auto; width: 34px; height: 34px; border: 0; background: #f4f6f8; border-radius: 9px; cursor: pointer; color: #5b6572; font-size: 15px; }
+#consent-detail .cd-x:hover { background: #e9edf2; }
+/* ══ A4 문서 배치 (사용자 지시 2026-10-20 — 운영 /user/consents/{id} 참고) ══════════════════
+   패널을 오른쪽 띠 대신 **가운데 A4 용지**(210mm ≈ 794px)로 띄운다. 회색 바탕 위 흰 종이 · 섹션 카드 · 칸형 필드. */
+#consent-detail .cd-card { left: 50%; right: auto; top: 2.5vh; height: 95vh; width: min(860px, 96vw);
+  border-radius: 16px; transform: translate(-50%, 12px); opacity: 0; transition: transform .2s ease-out, opacity .2s;
+  background: #eef1f5; overflow: hidden; }
+#consent-detail.on .cd-card { transform: translate(-50%, 0); opacity: 1; }
+#consent-detail .cd-head { background: #fff; }
+#consent-detail .cd-meta { background: #fff; }
+#consent-detail .cd-print { margin-left: auto; height: 34px; padding: 0 14px; border: 1px solid #d6e4ff; background: #f5f9ff; color: #2a85ff; border-radius: 9px; font: 700 13px Pretendard, system-ui; cursor: pointer; }
+#consent-detail .cd-print + .cd-x { margin-left: 6px; }
+#consent-detail .cd-body { padding: 22px 0 40px; }
+#consent-detail .cd-doc { width: min(794px, calc(100% - 32px)); margin: 0 auto; background: #fff; border-radius: 6px;
+  box-shadow: 0 2px 14px rgba(15,23,42,.10); padding: 34px 38px 40px; box-sizing: border-box; color: #1f2937; }
+#consent-detail .cd-doc-head { display: flex; align-items: flex-start; gap: 16px; padding-bottom: 16px; border-bottom: 2px solid #1f2937; margin-bottom: 18px; }
+#consent-detail .cd-doc-hl { flex: 1 1 auto; min-width: 0; }
+#consent-detail .cd-doc-kicker { font-size: 12px; font-weight: 700; color: #6b7280; letter-spacing: .2px; }
+#consent-detail .cd-doc-title { font-size: 24px; font-weight: 900; letter-spacing: -.6px; color: #111827; margin: 3px 0 6px; }
+#consent-detail .cd-doc-dates { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: #6b7280; font-variant-numeric: tabular-nums; }
+#consent-detail .cd-doc-badge { flex: none; font-size: 13px; font-weight: 800; padding: 6px 12px; border-radius: 999px; border: 1.5px solid; }
+#consent-detail .cd-doc-badge.ok { color: #047857; border-color: #6ee7b7; background: #ecfdf5; }
+#consent-detail .cd-doc-badge.wait { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+#consent-detail .cd-doc-sec { margin: 0 0 18px; }
+#consent-detail .cd-doc-sh { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; padding-left: 9px; border-left: 4px solid #2a85ff; }
+#consent-detail .cd-doc-st { font-size: 15.5px; font-weight: 800; color: #111827; }
+#consent-detail .cd-doc-ss { font-size: 11.5px; color: #9ca3af; }
+#consent-detail .cd-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
+#consent-detail .cd-grid.cols4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#consent-detail .cd-f { padding: 9px 12px; border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; min-width: 0; }
+#consent-detail .cd-f.wide { grid-column: 1 / -1; border-right: 0; }
+#consent-detail .cd-grid:not(.cols4) .cd-f:nth-child(2n):not(.wide) { border-right: 0; }
+#consent-detail .cd-grid .cd-f:last-child { border-bottom: 0; }
+#consent-detail .cd-fl { font-size: 11.5px; font-weight: 700; color: #6b7280; margin-bottom: 3px; }
+#consent-detail .cd-fv { font-size: 14.5px; font-weight: 700; color: #111827; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+#consent-detail .cd-mono { font: 500 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: #4b5563; word-break: break-all; }
+#consent-detail .cd-st { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+#consent-detail .cd-st.ok { border-color: #bfdbfe; background: #fbfdff; }
+#consent-detail .cd-st-h { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#consent-detail .cd-st-n { flex: none; font-size: 11px; font-weight: 800; color: #fff; background: #2a85ff; border-radius: 6px; padding: 2px 8px; }
+#consent-detail .cd-st-t { font-size: 14.5px; font-weight: 800; color: #1f2937; }
+#consent-detail .cd-st-chk { margin-left: auto; flex: none; font-size: 11.5px; font-weight: 700; color: #9ca3af; }
+#consent-detail .cd-st.ok .cd-st-chk { color: #047857; }
+#consent-detail .cd-st-c { padding: 6px 0 6px 12px; border-left: 2px solid #e5e7eb; margin: 0 0 6px 2px; }
+#consent-detail .cd-st-ct { font-size: 12.5px; font-weight: 800; color: #374151; margin-bottom: 2px; }
+#consent-detail .cd-st-cb { font-size: 13px; line-height: 1.65; color: #374151; }
+#consent-detail .cd-ack { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px dashed #e5e7eb; }
+#consent-detail .cd-ack-box { flex: none; width: 18px; height: 18px; border: 1.5px solid #9ca3af; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900; color: #fff; margin-top: 1px; }
+#consent-detail .cd-ack-box.on { background: #2a85ff; border-color: #2a85ff; }
+#consent-detail .cd-ack-box.na { border-style: dashed; color: #9ca3af; }
+/* 개발데이터(api-v1) = 덴트웹 **스캔 이미지만**(사용자 지시 2026-10-21). 장마다 A4 용지(794px)로 가운데 · 회색 바탕. */
+#consent-detail.cd-scan .cd-body > .cd-sec { width: min(794px, calc(100% - 32px)); margin: 0 auto; }
+#consent-detail.cd-scan .cd-sec-t { color: #475569; }
+#consent-detail.cd-scan .cd-imgs { gap: 22px; }
+#consent-detail.cd-scan .cd-fig { border: 0; border-radius: 4px; background: #fff; box-shadow: 0 2px 14px rgba(15,23,42,.12); }
+#consent-detail.cd-scan .cd-empty { width: min(794px, calc(100% - 32px)); margin: 0 auto; background: #fff; border-radius: 8px; }
+@media print { #consent-detail.cd-scan .cd-fig { box-shadow: none !important; break-inside: avoid; break-after: page; } }
+#consent-detail .cd-ack-tx { font-size: 13px; line-height: 1.6; color: #374151; }
+#consent-detail .cd-sign { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 14px; padding: 14px 16px; border: 1px solid #d1d5db; border-radius: 10px; }
+#consent-detail .cd-sign-nm { font-size: 18px; font-weight: 900; color: #111827; margin: 2px 0 4px; }
+#consent-detail .cd-sign-box { flex: none; width: 380px; max-width: 60%; height: 160px; border-bottom: 1.5px solid #111827; display: flex; align-items: center; justify-content: center; }
+#consent-detail .cd-sign-box img { max-width: 100%; max-height: 100%; }
+#consent-detail .cd-audit-t { margin-top: 10px; }
+#consent-detail .cd-empty.sm { padding: 12px 6px; font-size: 12.5px; border: 1px dashed #e5e7eb; border-radius: 8px; }
+@media (max-width: 640px) { #consent-detail .cd-grid, #consent-detail .cd-grid.cols4 { grid-template-columns: 1fr; } #consent-detail .cd-doc { padding: 22px 18px; } }
+/* 🖨 인쇄 — 동의서 용지만 A4 로(셸·목록·패널 머리는 숨긴다). */
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body.cd-printing > *:not(#consent-detail) { display: none !important; }
+  #consent-detail, #consent-detail .cd-card { position: static !important; transform: none !important; width: auto !important; height: auto !important; box-shadow: none !important; background: #fff !important; overflow: visible !important; opacity: 1 !important; }
+  #consent-detail .cd-back, #consent-detail .cd-head, #consent-detail .cd-meta { display: none !important; }
+  #consent-detail .cd-body { overflow: visible !important; padding: 0 !important; }
+  #consent-detail .cd-doc { width: auto !important; box-shadow: none !important; padding: 0 !important; }
+  #consent-detail .cd-break { break-before: auto; }
+  #consent-detail .cd-break-avoid, #consent-detail .cd-st, #consent-detail .cd-sign { break-inside: avoid; }
+}
+#consent-detail .cd-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 12px 20px; border-bottom: 1px solid #eef1f5; }
+#consent-detail .cd-meta span { font-size: 12.5px; color: #4b5563; }
+#consent-detail .cd-meta b { color: #8b95a1; font-weight: 600; margin-right: 5px; font-size: 11.5px; }
+#consent-detail .cd-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 20px 28px; }
+#consent-detail .cd-load, #consent-detail .cd-empty { color: #8b95a1; padding: 30px 6px; text-align: center; }
+#consent-detail .cd-dim { color: #aab2bd; font-size: 12.5px; }
+#consent-detail .cd-sec-t { font-size: 13px; font-weight: 800; color: #374151; margin-bottom: 10px; }
+#consent-detail .cd-kv { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px; }
+#consent-detail .cd-kv th { text-align: left; color: #8b95a1; font-weight: 600; width: 96px; padding: 5px 8px 5px 0; vertical-align: top; }
+#consent-detail .cd-kv td { padding: 5px 0; color: #1f2937; }
+#consent-detail .cd-pre { white-space: pre-wrap; background: #f8fafc; border: 1px solid #eef1f5; border-radius: 9px; padding: 11px 13px; font-size: 12.5px; color: #374151; }
+#consent-detail .cd-imgs { display: flex; flex-direction: column; gap: 14px; }
+#consent-detail .cd-fig { margin: 0; border: 1px solid #e6eaef; border-radius: 10px; overflow: hidden; background: #f8fafc; }
+#consent-detail .cd-fig img { display: block; width: 100%; height: auto; }
+#consent-detail .cd-fig figcaption { padding: 7px 11px; font-size: 12px; color: #6b7280; border-top: 1px solid #eef1f5; background: #fff; }
+/* 스캔 이미지 — 로딩 중(아직 src 없음) 플레이스홀더 · 실패 표시 */
+#consent-detail .cd-img[data-ph] { display: block; width: 100%; min-height: 160px; background: #f1f4f8 url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239aa6b2' stroke-width='2'><circle cx='12' cy='12' r='9' stroke-opacity='.25'/><path d='M12 3a9 9 0 0 1 9 9'/></svg>") center / 24px no-repeat; }
+#consent-detail .cd-img-fail { min-height: 70px; background: #fbeced; }
+/* ── 전자서명 동의서 구조화 내용(STEP/카드) — 운영 /user/consents/{id} 모양 ────── */
+#consent-detail .cd-cv-title { font-size: 17px; font-weight: 800; color: #1b1f26; margin: 2px 0 14px; letter-spacing: -.3px; }
+#consent-detail .cd-step { margin: 0 0 16px; }
+#consent-detail .cd-step-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px solid #eef1f5; }
+#consent-detail .cd-step-n { font-size: 11px; font-weight: 800; color: #fff; background: #3182f6; border-radius: 6px; padding: 2px 7px; letter-spacing: .3px; }
+#consent-detail .cd-step-t { font-size: 14px; font-weight: 800; color: #263041; }
+#consent-detail .cd-step-ok { margin-left: auto; font-size: 11.5px; font-weight: 700; color: #0ea371; background: #e6f7f0; border-radius: 999px; padding: 2px 10px; }
+#consent-detail .cd-card2 { padding: 7px 0 7px 12px; border-left: 2px solid #e6eaef; margin: 0 0 7px 2px; }
+#consent-detail .cd-card2-t { font-size: 12.5px; font-weight: 700; color: #4b5563; margin-bottom: 2px; }
+#consent-detail .cd-card2-b { font-size: 13px; line-height: 1.6; color: #374151; }
+#consent-detail .cd-ack-at { font-size: 11.5px; color: #8b95a1; margin-top: 4px; }
+/* 전자서명 이미지 */
+#consent-detail .cd-sig { margin: 8px 0 4px 2px; padding: 10px 12px; border: 1px solid #e6eaef; border-radius: 10px; background: #fafbfc; }
+#consent-detail .cd-sig-t { font-size: 12.5px; font-weight: 700; color: #4b5563; margin-bottom: 8px; }
+#consent-detail .cd-sig-img { display: block; max-width: 260px; max-height: 120px; background: #fff; border: 1px solid #eef1f5; border-radius: 6px; }
+/* 전자동의 로그(감사 추적) — 접이식 */
+#consent-detail .cd-audit { margin: 10px 0 4px; border: 1px solid #eef1f5; border-radius: 10px; background: #fafbfc; padding: 0 12px; }
+#consent-detail .cd-audit summary { cursor: pointer; padding: 11px 0; font-size: 12.5px; font-weight: 700; color: #5b6572; list-style: none; }
+#consent-detail .cd-audit summary::-webkit-details-marker { display: none; }
+#consent-detail .cd-audit summary::before { content: "▸ "; color: #9aa6b2; }
+#consent-detail .cd-audit[open] summary::before { content: "▾ "; }
+#consent-detail .cd-audit table { margin: 0 0 12px; }
+#consent-detail .cd-audit .cd-kv th { width: 72px; }
+#consent-detail .cd-audit .cd-kv td { word-break: break-all; font-size: 12px; color: #5b6572; }
+
+/* 사이드바 머리는 링크가 아니다(2026-10-21) — 누르면 이동하는 것처럼 보이지 않게 */
+.side-nav-header{cursor:default}

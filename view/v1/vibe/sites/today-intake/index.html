@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>오늘 접수 현황판</title>
+<style>
+  :root { --bg:#f7f7f5; --fg:#1d1d1b; --mut:#6b6b66; --line:#e3e3de; --acc:#2f6f5e; --vip:#b4561f; --card:#fff }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --fg:#ecece8; --mut:#9a9a93; --line:#2c2c2a; --acc:#6fbfa7; --vip:#e59a63; --card:#1f1f1d } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.5 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:var(--bg); color:var(--fg) }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:baseline; justify-content:space-between; padding:16px }
+  h1 { font-size:20px; margin:0 } #status { color:var(--mut); font-size:13px }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:0 16px }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px }
+  .kpi b { display:block; font-size:24px; font-variant-numeric:tabular-nums } .kpi span { color:var(--mut); font-size:12px }
+  .wrap { padding:16px; overflow-x:auto } table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap } th { color:var(--mut); font-weight:500; font-size:13px }
+  td.time { font-variant-numeric:tabular-nums } .vip { color:var(--vip); font-weight:600 } .empty { color:var(--mut); padding:24px; text-align:center }
+  @media (max-width:560px) { .kpis { grid-template-columns:repeat(2,1fr) } }
+</style>
+</head>
+<body>
+<header><h1>오늘 접수 현황판</h1><span id="status">불러오는 중…</span></header>
+<section class="kpis">
+  <div class="kpi"><b id="k-total">-</b><span>오늘 접수</span></div>
+  <div class="kpi"><b id="k-am">-</b><span>오전</span></div>
+  <div class="kpi"><b id="k-pm">-</b><span>오후</span></div>
+  <div class="kpi"><b id="k-vip">-</b><span>VIP</span></div>
+</section>
+<div class="wrap"><table><thead><tr><th>시각</th><th>이름</th><th>내원 사유</th></tr></thead><tbody id="rows"></tbody></table></div>
+
+<!-- 순수 함수만 (fetch·DOM 금지). tests/pages/today-intake.test.mjs 가 이 블록을 불러 검증한다. -->
+<script id="logic">
+const Logic = {
+  // 브라우저 시계와 무관하게 서울 날짜 (UTC 직접 비교 금지)
+  seoulDate(d) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+  },
+  // createdAt 은 서버가 서울 현지 시각 문자열("YYYY-MM-DDTHH:mm:ss")로 준다
+  todayRows(items, today) {
+    return (items || [])
+      .filter((it) => typeof it.createdAt === 'string' && it.createdAt.slice(0, 10) === today)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((it) => ({ time: it.createdAt.slice(11, 16), name: it.name || '', reason: it.reasonSummary || '', vip: !!it.isVip }))
+  },
+  summary(rows) {
+    return {
+      total: rows.length,
+      vip: rows.filter((r) => r.vip).length,
+      am: rows.filter((r) => r.time < '12:00').length,
+      pm: rows.filter((r) => r.time >= '12:00').length,
+    }
+  },
+}
+</script>
+
+<!-- 화면: 같은 호스트 API 를 읽어 그린다 -->
+<script>
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+// 목업 서버(픽스처 날짜 2000-01-01)에서 열면 ?date=2000-01-01 로 본다
+const forced = new URLSearchParams(location.search).get('date')
+
+async function load() {
+  try {
+    const res = await fetch('/api-v1/data/api/intakes/lite')
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const body = await res.json()
+    const today = forced || Logic.seoulDate(new Date())
+    const rows = Logic.todayRows(body.items, today)
+    const s = Logic.summary(rows)
+    $('k-total').textContent = s.total; $('k-am').textContent = s.am; $('k-pm').textContent = s.pm; $('k-vip').textContent = s.vip
+    $('rows').innerHTML = rows.length
+      ? rows.map((r) => `<tr><td class="time">${r.time}</td><td class="${r.vip ? 'vip' : ''}">${esc(r.name)}${r.vip ? ' ★' : ''}</td><td>${esc(r.reason)}</td></tr>`).join('')
+      : '<tr><td colspan="3" class="empty">오늘 접수가 아직 없습니다</td></tr>'
+    $('status').textContent = `${today} · ${new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' })} 갱신 (1분마다)`
+  } catch (e) {
+    $('status').textContent = '불러오기 실패 — ' + e.message + ' (1분 뒤 다시 시도)'
+  }
+}
+load(); setInterval(load, 60000)
+</script>
+</body>
+</html>

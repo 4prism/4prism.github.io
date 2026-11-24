@@ -1,0 +1,1845 @@
+<!--
+  ⚠️ **생성물이다. 손으로 고치지 마라.**
+     원본  src-tauri/src/server/app_v2.html
+     생성  python3 docs/local/vibe/build.py   (scripts 는 clinic-v2-app 저장소)
+
+  vibe-deploy(:4000) 업로드용 **단일 HTML** — 빌드 없이 그대로 서빙된다.
+  그래서 원본의 외부 자산(`/app-shared.css` 등)을 **전부 인라인**했다.
+
+  🔴 API 는 **다른 호스트**(https://192.168.0.236) 로 나간다. 이 파일이 서빙되는 곳은 :4000 이고
+     접수·문진 API 는 서버 앱(:7331 / :443)에 있다. 상대 경로로 두면 :4000 을
+     때려 전부 404 가 되므로, `fetch()` 앞에 베이스를 붙였다.
+     CORS 는 `access-control-allow-origin: *` 로 열려 있다(실측 2026-10-12).
+
+  ⚠️ 주소를 바꾸려면 아래 `window.__API_BASE__` 한 줄만 고치면 된다.
+-->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>접수·문진 V2 개선 칸반 — 모닝</title>
+<script>
+/* ── vibe-deploy 전용 덧댐 — 원본에는 없다 ──────────────────────────────
+   🔴 이 HTML 은 **:4000** 에서 서빙되는데 접수·문진 API 는 **서버 앱**에 있다.
+      상대 경로로 부르면 :4000 을 때려 전부 404 다 — 그래서 베이스를 붙인다.
+   ⚠️ 주소가 다른 치과면 **이 한 줄만** 고치면 된다. */
+window.__API_BASE__ = window.__API_BASE__ || 'https://192.168.0.236';
+function API(p){
+  // 이미 절대 URL 이면 그대로 둔다(토큰페이지 링크 등).
+  if(/^https?:\/\//i.test(p)) return p;
+  return window.__API_BASE__.replace(/\/+$/,'') + p;
+}
+</script>
+
+<!-- 🔴 CDN 없음 — 병원 내부망은 인터넷이 없을 수 있다. -->
+<style>
+/* ── 인라인: /app-shared.css ── */
+/* 접수·문진 화면 공통 껍데기 — 좌측 탭 · 헤더 · 모달 · 토스트.
+ *
+ * 🔴 CDN 없음 — 병원 내부망은 인터넷이 없을 수 있다.
+ * 🔴 이 파일은 **여러 버전 화면(/app-v2 … /app-v6)이 공유**한다. 보드(가운데
+ *    본문)만 버전마다 다르고 껍데기는 같아야 버전을 오가도 길을 잃지 않는다.
+ *    그래서 보드 전용 규칙은 여기 두지 않는다 — 각 HTML 안에 둔다.
+ */
+
+:root{
+  --bg:#f2f4f6; --card:#fff; --line:#e5e8eb; --tx:#191f28;
+  /* 🔴 보조 글자색. 예전 #8b95a1 은 흰 바탕 대비 2.9:1 로 WCAG AA(4.5:1) 미달이었다.
+     체어사이드는 조명이 밝고 화면을 비스듬히 본다 — 4.7:1 로 올린다. */
+  --dim:#6b7785;
+  --dim2:#8b95a1;          /* 장식용(아이콘·구분선). 글자에는 쓰지 않는다. */
+  --blue:#3182f6; --blue-d:#1b64da; --blue-bg:#eff6ff;
+  --red:#f04452; --red-bg:#fff4f4; --red-d:#c9303c;
+  --green:#00875a; --green-bg:#e7f7f0;
+  --amber:#b45309; --amber-bg:#fff6e5;
+  --purple:#7c3aed; --purple-bg:#f3efff;
+  --nav:196px;
+  --hdr:56px;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--tx);
+  font:14px/1.6 Pretendard,-apple-system,system-ui,"Segoe UI",sans-serif;
+  /* 🔴 숫자 폭을 **전역으로** 고정한다(2026-10-07 사용자 지시).
+     이 화면은 10초마다 다시 그린다 — 환자 수·시각·경과 분이 바뀔 때 숫자마다
+     폭이 달라지면(1 은 좁고 0 은 넓다) 글자가 좌우로 흔들려 읽는 눈이 따라간다.
+     ⚠️ 선택자마다 따로 붙이지 말 것. 예전엔 14곳에 흩어져 있었고, 그래서 새로
+        만든 자리는 늘 빠졌다 — 여기 한 번 걸면 전부 적용된다.
+     ⚠️ 한글·영문 폭은 건드리지 않는다(`tabular-nums` 는 숫자 자형만 바꾼다). */
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased}
+
+/* 🔴 폼 요소는 글꼴을 **상속하지 않는다**(브라우저 기본값). body 에 건 숫자 폭
+     고정이 버튼·입력칸 안에서만 풀려, 「지금」·시간대 이동처럼 숫자가 든 버튼이
+     갱신될 때마다 흔들린다. 여기서 다시 걸어 준다.
+     ⚠️ `font:` **단축 속성도 같은 효과**를 낸다(쓰지 않은 하위 속성을 initial 로
+        되돌린다). 그래서 화면 쪽 버튼의 `font:600 12.5px …` 는 전부
+        `font-weight`+`font-size` 로 풀어 뒀다 — 다시 단축으로 합치지 말 것. */
+button,input,select,textarea{font-family:inherit;font-variant-numeric:tabular-nums}
+
+/* ── 좌측 탭 ─────────────────────────────────────────────────────────── */
+nav{position:fixed;left:0;top:0;bottom:0;width:var(--nav);background:var(--card);
+  border-right:1px solid var(--line);padding:16px 8px;overflow-y:auto;z-index:500}
+nav .brand{display:flex;flex-direction:column;gap:1px;padding:4px 8px 14px}
+nav .brand b{font-size:17px;letter-spacing:-.5px}
+nav .brand span{font-size:12px;color:var(--dim)}
+/* 그룹 이름(진료 · 환자관리 / 리콜 업무 / 관리 / 프로토타입) — **네 개가 모두 같다**.
+   예전엔 'WORKSPACE' 같은 작은 라벨용이라 11px 였는데, 이제 메뉴 묶음의 제목이라
+   서브탭(13px)보다 또렷해야 어디까지가 한 묶음인지 한눈에 잡힌다. */
+nav .grp{font-size:12.5px;color:var(--tx);font-weight:800;padding:14px 9px 6px;
+  letter-spacing:-.1px}
+nav .grp:first-of-type{padding-top:4px}
+nav a{display:flex;align-items:center;gap:6px;padding:8px 9px;border-radius:9px;
+  color:var(--tx);text-decoration:none;font-size:13.5px;font-weight:600;cursor:pointer}
+nav a:hover{background:#f7f8f9}
+/* 🔴 `a.parent` 규칙은 **없앴다**(2026-10-07). 그룹 이름이 전부 `.grp` 로 통일돼
+   누를 수 있는 부모 링크 자체가 사라졌다. 「하위가 켜지면 부모는 굵게만」이라는
+   예전 규칙도 함께 불필요해졌다 — 이제 켜지는 건 서브탭 하나뿐이다. */
+nav a.on{background:var(--blue-bg);color:var(--blue-d)}
+/* 서브탭 — 접수·문진 / 예약 가능 시간 / 운영 점검 / API 문서 / 프로토타입 전부
+   **같은 크기·굵기·들여쓰기**다. 줄마다 달라 보이면 같은 층인지 매번 다시 읽게 된다. */
+nav a.sub{padding-left:20px;font-size:13px;font-weight:500;position:relative}
+nav a.sub:before{content:'';position:absolute;left:10px;width:4px;height:4px;
+  border-radius:50%;background:var(--line)}
+nav a.sub.on:before{background:var(--blue)}
+/* 버전 목록 — 접수·문진 아래 한 단 더 들어간다. */
+nav a.ver{padding-left:32px;font-size:12.5px;font-weight:500;color:#4e5968}
+nav a.ver:before{content:'';position:absolute;left:22px;width:3px;height:3px;
+  border-radius:50%;background:var(--line)}
+nav a.ver.on{background:var(--blue-bg);color:var(--blue-d);font-weight:700}
+nav a.ver.on:before{background:var(--blue)}
+nav a.ver .vt{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--dim2);
+  letter-spacing:.02em}
+nav a.ver.on .vt{color:var(--blue-d)}
+nav a .cnt{margin-left:auto;font-size:11.5px;font-weight:700;background:#f2f4f6;
+  color:var(--dim);border-radius:999px;padding:1px 7px}
+nav a.on .cnt{background:var(--blue);color:#fff}
+nav a.off{color:#aeb6bf;cursor:not-allowed} nav a.off:hover{background:transparent}
+nav .navx{display:none;border:0;background:#f2f4f6;border-radius:50%;
+  width:30px;height:30px;cursor:pointer;font-size:15px;color:#4e5968;
+  position:absolute;right:10px;top:12px;padding:0}
+
+.burger{display:none;border:1px solid var(--line);background:#fbfcfd;border-radius:9px;
+  width:34px;height:34px;cursor:pointer;font-size:16px;color:#4e5968;padding:0;flex:0 0 auto}
+.burger:hover{background:#f2f4f6;color:var(--tx)}
+.scrim{display:none;position:fixed;inset:0;background:rgba(17,20,24,.42);z-index:480}
+.scrim.show{display:block}
+body.navlock{overflow:hidden}
+
+/* ── 본문 껍데기 ─────────────────────────────────────────────────────── */
+.main{margin-left:var(--nav)}
+/* 🔴 헤더는 **고정**이다. 완료 카드가 쌓이면 본문이 1만 px 를 넘어가는데
+     그때 연결 상태·새로고침·갱신 시각이 화면 밖으로 사라지면,
+     10초마다 갱신되는 화면인지 멈춘 화면인지 구분할 길이 없어진다. */
+header{position:sticky;top:0;z-index:400;
+  background:var(--card);border-bottom:1px solid var(--line);
+  padding:0 18px;min-height:var(--hdr);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+header .crumb{color:var(--dim);font-size:13px}
+header .sp{flex:1}
+.chip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;
+  background:var(--green-bg);color:var(--green);white-space:nowrap}
+.chip.no{background:var(--red-bg);color:var(--red-d)}
+.chip.ro{background:#f2f4f6;color:#4e5968}
+/* 마지막 갱신 시각 — 화면이 살아 있다는 유일한 증거다. */
+.freshen{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.freshen b{font-weight:700;color:#4e5968}
+.tool{display:flex;align-items:center;gap:6px}
+.btn2{border:1px solid var(--line);background:#fbfcfd;border-radius:9px;height:34px;
+  padding:0 11px;cursor:pointer;font-weight:600;font-size:12.5px;color:#4e5968}
+.btn2:hover{background:#f2f4f6;color:var(--tx)}
+.btn2.on{background:var(--blue-bg);border-color:#cfe1fd;color:var(--blue-d)}
+.iconbtn{border:1px solid var(--line);background:#fbfcfd;border-radius:9px;
+  width:34px;height:34px;cursor:pointer;font-size:15px;color:var(--dim);padding:0}
+.iconbtn:hover{background:#f2f4f6;color:var(--tx)}
+.iconbtn.spin{animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+main{padding:16px 18px 56px}
+.title{font-size:20px;font-weight:800;letter-spacing:-.5px;margin:2px 0 2px}
+.sub{color:var(--dim);font-size:13.5px;margin-bottom:14px}
+
+/* 버전 안내 띠 — 어떤 실험인지 한 줄로 밝힌다. */
+.vbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:9px 13px;margin-bottom:14px}
+.vbar .vn{font-size:12px;font-weight:800;letter-spacing:.04em;color:#fff;
+  background:var(--purple);border-radius:6px;padding:2px 7px;flex:0 0 auto}
+.vbar .vd{font-size:12.5px;color:#4e5968;min-width:0}
+.vbar .vd b{color:var(--tx)}
+
+/* 공통 태그 */
+.tag{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:7px;
+  background:#f2f4f6;color:#4e5968;white-space:nowrap}
+.tag.new{background:var(--blue-bg);color:var(--blue-d)}
+.tag.no{background:var(--red-bg);color:var(--red-d)}
+.tag.ok{background:var(--green-bg);color:var(--green)}
+.tag.wait{background:var(--amber-bg);color:var(--amber)}
+
+.err{background:var(--red-bg);border:1px solid #ffd0d0;color:#8a1c24;
+  border-radius:13px;padding:14px 16px;font-size:13.5px}
+.err a{color:#8a1c24}
+.empty{color:var(--dim);font-size:13px;text-align:center;padding:18px 0;
+  border:1px dashed var(--line);border-radius:12px}
+
+/* ── 중앙 경고(토스트) ───────────────────────────────────────────────── */
+.toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  background:rgba(25,31,40,.94);color:#fff;padding:18px 26px;border-radius:14px;
+  font-size:15px;font-weight:600;z-index:999;pointer-events:none;
+  box-shadow:0 12px 40px rgba(0,0,0,.28);text-align:center;line-height:1.5;
+  opacity:0;transition:opacity .15s}
+.toast.show{opacity:1}
+.toast .s{display:block;font-size:12.5px;font-weight:500;opacity:.8;margin-top:5px}
+
+/* ── 히스토리 모달(카카오톡 단체방 형태) ─────────────────────────────── */
+.modal{position:fixed;inset:0;background:rgba(17,20,24,.5);z-index:900;
+  display:flex;align-items:center;justify-content:center;padding:28px}
+.modal .sheet{background:#b2c7da;border-radius:18px;width:100%;max-width:760px;
+  max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+.modal .mh{background:var(--card);padding:16px 20px;display:flex;align-items:center;
+  gap:10px;border-bottom:1px solid var(--line)}
+.modal .mh b{font-size:17px;letter-spacing:-.3px}
+.modal .mh .sp{flex:1}
+.modal .x{border:0;background:#f2f4f6;border-radius:50%;width:32px;height:32px;
+  cursor:pointer;font-size:16px;color:#4e5968}
+.modal .mb{padding:18px;overflow-y:auto;flex:1}
+.day{text-align:center;margin:12px 0}
+.day span{background:rgba(0,0,0,.25);color:#fff;font-size:11.5px;font-weight:600;
+  padding:3px 11px;border-radius:999px}
+.bub{display:flex;gap:8px;margin-bottom:12px;align-items:flex-end}
+.bub.me{flex-direction:row-reverse}
+.av{width:32px;height:32px;border-radius:11px;background:#5a6572;color:#fff;flex:none;
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+/* ⚠️ `.av` 는 11px 을 **그대로 둔다**(2026-10-07 글자 키우기에서 제외). 32×32 원
+     안에 이름 두 글자가 들어가야 한다 — 12px 로 올리면 넘쳐 잘린다. */
+.bub.me .av{background:var(--blue)}
+.bub.dw .av{background:#00875a}
+.wrap2{max-width:72%}
+.who{font-size:11.5px;color:#2f3a46;margin-bottom:3px}
+.bub.me .who{text-align:right}
+.msg2{background:#fff;border-radius:4px 14px 14px 14px;padding:9px 13px;font-size:13.5px;
+  line-height:1.55;word-break:break-all;white-space:pre-wrap}
+.bub.me .msg2{background:#fef01b;border-radius:14px 4px 14px 14px}
+.tm2{font-size:10.5px;color:#3f4a55;margin-top:3px}
+.bub.me .tm2{text-align:right}
+.kindtag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;
+  border-radius:5px;background:rgba(0,0,0,.07);margin-right:5px}
+.noitem{text-align:center;color:#34414e;font-size:13.5px;padding:40px 0}
+
+/* ── 모바일 ──────────────────────────────────────────────────────────── */
+@media(max-width:720px){
+  .main{margin-left:0}
+  .burger{display:block}
+  nav .navx{display:block}
+  nav{width:min(272px,82vw);z-index:490;transform:translateX(-100%);
+    transition:transform .18s ease;box-shadow:none;padding-top:14px}
+  nav.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.18)}
+  nav .brand{padding-right:42px}
+  nav a{padding:11px 11px;font-size:14.5px}
+  nav a.sub{padding-left:22px;font-size:14px}
+  nav a.ver{padding-left:34px;font-size:13.5px}
+  main{padding:12px 12px 56px}
+  header{padding:0 12px}
+}
+/* 넓어지면 서랍 상태가 남아 있어도 평소 탭으로 돌아간다 — 폭 판정은 CSS 가 쥔다.
+   JS 의 resize 에만 맡기면 이벤트가 안 오는 웹뷰에서 바탕이 화면을 덮은 채 남는다. */
+@media(min-width:721px){
+  nav{transform:none}
+  .scrim,.scrim.show{display:none}
+  body.navlock{overflow:auto}
+}
+
+/* 접근성 — 포커스가 어디 있는지 보이게. 10초 폴링으로 DOM 이 갈아끼워지는
+   화면이라 키보드 사용자는 특히 길을 잃기 쉽다. */
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ── 히스토리: 진료 기록 줄 · 병력 띠 ─────────────────────────────────
+ * 🔴 운영본 /app 에서 쓰던 스타일을 공용으로 올렸다(2026-10-06). 말풍선만
+ *    쓰면 「수납 3,900원」·「발치 #18,48」까지 카톡처럼 떠서 환자가 한 말인지
+ *    우리가 한 처치인지 구분이 안 된다. */
+.rec{display:flex;gap:10px;background:#fff;border-radius:11px;padding:9px 12px;
+  margin-bottom:7px;align-items:flex-start}
+.rec .rtm{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;
+  white-space:nowrap;padding-top:2px;flex:0 0 38px}
+.rec .rbody{min-width:0;flex:1}
+.rec .rhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13.5px}
+.rec .rhead b{font-weight:700;letter-spacing:-.2px}
+.rec .rtext{font-size:13px;color:#4e5968;margin-top:3px;line-height:1.55;
+  white-space:pre-wrap;word-break:break-all}
+.rec .tooth{font-size:11.5px;font-weight:700;color:var(--blue-d);
+  background:var(--blue-bg);border-radius:6px;padding:1px 6px}
+.rec .rmeta{font-size:11.5px;color:var(--dim)}
+/* 진료 시작·끝은 흐름의 매듭 — 왼쪽에 선을 세워 눈에 걸리게 한다. */
+.rec.flow{background:#f7f9fa;border-left:3px solid var(--blue)}
+/* 종류별 색 — 돈·병력은 특히 눈에 띄어야 한다. */
+.rec.k-수납 .kindtag{background:var(--green-bg);color:var(--green)}
+.rec.k-병력{background:var(--red-bg)}
+.rec.k-병력 .kindtag{background:#ffd9d9;color:var(--red)}
+.rec.k-진료 .kindtag{background:var(--blue-bg);color:var(--blue-d)}
+/* 전화(콜백·리콜 노트)와 상담(치료계획)은 **사람이 말을 건 기록**이라 따로 세운다. */
+.rec.k-전화 .kindtag{background:#f3e8ff;color:#7e22ce}
+.rec.k-상담 .kindtag{background:#fff6e5;color:var(--amber)}
+.rec.k-다음예약 .kindtag,.rec.k-예약 .kindtag{background:#e8f3ff;color:#1b64da}
+/* 🔴 미수(안 받은 돈)는 눈에 걸려야 한다 — 수납과 같은 초록이면 낸 줄로 읽힌다. */
+.rec.k-수납 .rhead b{color:var(--green)}
+.rec.k-수납.unpaid{background:var(--amber-bg)}
+.rec.k-수납.unpaid .kindtag{background:#ffe4b5;color:var(--amber)}
+.rec.k-수납.unpaid .rhead b{color:var(--amber)}
+
+/* 🔴 병력 띠 — 맨 위에 **붙어 따라온다**(sticky). 스크롤하면 사라지는 자리에 두면
+   긴 이력에서는 못 본 것과 같다. 발치·수술 전에 눈에 걸려야 하는 값이다. */
+.pmhbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px;
+  background:var(--red-bg);border:1px solid #ffd0d0;border-radius:11px;
+  padding:9px 11px;margin-bottom:10px}
+.pmhbar:before{content:'병력';font-size:12px;font-weight:700;color:var(--red);
+  align-self:center;margin-right:2px}
+.pmhchip{font-size:12.5px;font-weight:600;color:#8a1c24;background:#fff;
+  border-radius:7px;padding:2px 8px}
+
+/* ─── 할 일 띠 ─── /app-alerts.js 가 그린다. V2(/clinic/reception)·V3 공용.
+   🔴 화면 쪽 <style> 로 되돌리지 말 것 — 두 화면이 같은 띠를 쓰므로 모양이
+      갈라진다(2026-10-07 사용자 지시로 V2 에서 여기로 옮겼다). */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:8px;margin-bottom:10px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:10px 13px;min-width:0;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.kpi:hover{border-color:#cfd6dd;background:#fbfcfd}
+.kpi.sel{border-color:var(--blue);background:var(--blue-bg)}
+/* 🔴 누를 수 없는 박스(거를 대상이 아닌 값)는 **손 모양을 주지 않는다** —
+     눌러도 안 바뀌는데 커서만 바뀌면 고장으로 읽힌다.
+     `.flat` 은 아예 <div> 로 그린 것(V3 처럼 필터가 없는 화면).
+     ⚠️ `.kpi:hover` **뒤에** 와야 덮어쓴다(CSS 는 나중 규칙이 이긴다). */
+.kpi[data-f=""],.kpi.flat{cursor:default}
+.kpi[data-f=""]:hover,.kpi.flat:hover{border-color:var(--line);background:var(--card)}
+/* 아직 셀 수 없는 값 — 0 과 **반드시 달라 보여야** 한다. */
+.kpi .unk{color:var(--dim2);font-weight:700}
+.kpi .n{font-size:20px;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:12px;color:var(--dim);margin-top:1px}
+.kpi.warn{border-color:#f6c9cd;background:var(--red-bg)}
+.kpi.warn .n{color:var(--red-d)}
+.kpi.calm .n{color:var(--dim2)}      /* 0 건이면 경고가 아니다 — 색을 뺀다 */
+
+</style>
+<style>
+/* ── V2 : 「지금 쓰는 칸반을 그대로 고쳐 쓴다」 ─────────────────────────
+ *
+ * v1 과 같은 모양이라 직원이 다시 배울 게 없다. 대신 2026-10-06 실측에서 나온
+ * 문제를 전부 막는다.
+ *   ① 체어 태그가 raw id(9)였다 → 이름(6번)으로            [app_shared.js]
+ *   ② 「문진 없음」이 완료 91/91 에 붙었다 → 진료 전만       [app_shared.js]
+ *   ③ 헤더가 static 이라 1만 px 스크롤에서 사라졌다 → sticky [app_shared.css]
+ *   ④ 「내원 전」이 영구 빈칸이었다 → 칸 자체를 뺀다         [app_shared.js]
+ *   ⑤ 완료 91장이 세로 10,911px 를 먹었다 → 기본 접기
+ *   ⑥ 1100px 에서 3칸으로 접히며 수납·완료가 1만 px 아래로 → 가로 스크롤 유지
+ */
+
+/* 요약 — 4단계 + 챙길 것 2개. 단계 칸과 **수가 다르므로** 폭을 맞추려 하지 않고
+   아예 다른 묶음으로 보이게 둔다(v1 은 6 vs 5 로 어긋나 선이 하나도 안 맞았다). */
+/* 할 일 띠(.kpis/.kpi)는 **공유 CSS**(/app-shared.css)로 옮겼다 — V3 도 쓴다.
+   🔴 여기에 다시 적지 말 것(2026-10-07). */
+.kpi.calm{border-color:var(--line);background:var(--card)}
+
+/* 🔴 5칸(내원 전 → 접수 → 진료 → 수납 → 완료)은 **한 줄에 전부** 들어가야 한다 —
+     한 줄기로 읽히는 게 이 화면의 전부다.
+   ⚠️ **가로 스크롤(overflow-x:auto)로 풀면 안 된다.** overflow 를 주는 순간
+      `.cols` 가 **스크롤 컨테이너**가 되어, 그 안의 `position:sticky` 칼럼 제목이
+      화면(viewport)이 아니라 **격자 상자**를 기준으로 붙는다. 실측 2026-10-06:
+      제목이 56px 아래로 밀려 **첫 카드 이름 위에 겹쳐** 환자 이름이 가려졌다.
+      그래서 넘치게 두지 않는다 — 좁아지면 접는다.
+   🔴 접을 때 순서가 흐름과 어긋나지 않게 한다: 1200px 이하는 3칸
+      (내원전·접수·진료)(수납·완료), 900px 이하는 2칸, 560px 이하는 1칸. */
+.cols{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+@media(max-width:1200px){.cols{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.cols{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.cols{grid-template-columns:1fr}}
+.col{min-width:0}
+/* 칼럼 제목도 고정 — 어느 단계를 보고 있는지 스크롤 중에도 보여야 한다. */
+.colhead{position:sticky;top:var(--hdr);z-index:300;
+  display:flex;align-items:center;gap:7px;padding:8px 4px 9px;
+  background:var(--bg)}
+.colhead .dotmark{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.colhead .t{font-size:14.5px;font-weight:700}
+.colhead .c{font-size:12.5px;color:var(--dim);background:var(--card);
+  border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums}
+.colhead .more{margin-left:auto;border:1px solid var(--line);background:var(--card);
+  border-radius:8px;font-weight:600;font-size:11.5px;color:#4e5968;
+  padding:3px 8px;cursor:pointer}
+.colhead .more:hover{background:#f2f4f6}
+
+.pt{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:11px 12px;margin-bottom:8px;position:relative}
+.pt.urg{border-color:#f6c9cd;background:var(--red-bg)}
+/* 🔴 카드 첫 줄은 **이름 + 차트번호**뿐이다. v1 은 여기에 히스토리 버튼과 시각까지
+     넣어 1280px(칸 204px)에서 이름이 「타이티튀꾸옌→타이티튀…」로 잘렸다(실측).
+     네 조각을 204px 에 욱여넣는 건 불가능하다 — 시각·버튼을 아래로 내린다.
+     ⚠️ 이름은 **자르지 않는다**. 환자를 가리키는 값이라 잘리면 못 쓴다. */
+.pt .r1{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.pt .nm{font-size:15px;font-weight:700;letter-spacing:-.3px}
+.pt .ch{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+.pt .r2{display:flex;align-items:center;gap:6px;margin-top:4px;
+  font-size:12px;color:var(--dim);flex-wrap:wrap}
+.pt .r2 .tm{font-variant-numeric:tabular-nums}
+.pt .r2 .dot{width:3px;height:3px;border-radius:50%;background:var(--line);flex:0 0 auto}
+.pt .memo{font-size:12.5px;color:#3f4a55;margin-top:6px;line-height:1.5;
+  word-break:break-word;
+  /* 긴 진료내용이 카드를 2배로 늘려 옆 칸과 리듬이 깨진다 — 2줄까지만. */
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tags{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+.acts{display:flex;gap:6px;margin-top:8px}
+.acts button{flex:1;font-weight:600;font-size:12.5px;padding:7px 8px;
+  border:1px solid var(--line);border-radius:8px;background:#fbfcfd;color:#4e5968;cursor:pointer}
+.acts button:hover{background:#f2f4f6;color:var(--tx)}
+.acts button.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.acts button.pri:hover{background:var(--blue-d)}
+.acts button:disabled{color:#aeb6bf;background:#fbfcfd;cursor:default}
+.sendmsg{font-size:11.5px;margin-top:6px}
+.sendmsg.ok{color:var(--green)} .sendmsg.no{color:var(--red-d)}
+
+/* 체어 — 빈 체어 12개가 세로 530px 를 먹던 자리(v1 실측)를 한 줄로 접는다. */
+.chair{border:1px solid var(--line);border-radius:12px;padding:7px 7px 2px;
+  margin-bottom:8px;background:#fafbfc}
+.chair .chlab{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;
+  color:#4e5968;padding:1px 3px 7px}
+.chair .chlab .meter{margin-left:auto;font-weight:600;font-size:12px;color:var(--dim)}
+.freebar{border:1px dashed var(--line);border-radius:12px;padding:9px 11px;
+  background:transparent;font-size:12.5px;color:var(--dim);line-height:1.7}
+.freebar b{color:#4e5968;font-weight:700}
+.freebar .rm{color:var(--dim2)}      /* 엑스레이실 — 진료 체어와 구분 */
+
+/* 완료 접기 — 기본 10장. 「전체 보기」로 펼친다. */
+.foldmsg{text-align:center;font-size:12.5px;color:var(--dim);padding:10px 0 2px}
+
+/* ── 드래그로 단계 옮기기 ────────────────────────────────────────────
+ * 🔴 운영본에 있던 기능이다. 카드를 다른 칸에 떨구면 덴트웹 `n상태` 가 바뀐다.
+ *    실패하면 화면을 **서버 상태로 되돌린다** — 화면만 옮겨지면 DB 와 갈린다. */
+.pt[draggable]{cursor:grab}
+.pt.dragging{opacity:.4}
+.col.over .drop{border-color:var(--blue);background:var(--blue-bg)}
+/* 체어 위로 끌어왔을 때 — 어느 체어에 놓이는지 **놓기 전에** 보여준다.
+   칸 전체가 물드는 것(.col.over)과 달리 체어 하나만 물들어야 구분이 된다. */
+.chair.over{border-color:var(--blue);background:var(--blue-bg);box-shadow:0 0 0 2px var(--blue-bg)}
+.drop{min-height:40px;border:1.5px dashed transparent;border-radius:13px;
+  transition:background .12s,border-color .12s}
+
+/* 「내원 전」 카드 — 접수 전이라 **끌 수 없다**(덴트웹에 행이 없다). */
+.pt.before{cursor:default}
+.pt.before .tm{font-size:12px;color:var(--blue-d);font-weight:700;
+  font-variant-numeric:tabular-nums}
+
+/* 빈 체어는 **점선** — 「여기 비었다」가 모양으로 읽혀야 한다(사용자 지시). */
+.chair.free{border-style:dashed;background:transparent}
+.chair .freetag{margin-left:auto;font-weight:600;font-size:12px;color:var(--dim);opacity:.75}
+/* 빈 체어 묶음 머리 — 몇 자리인지 먼저 말해 준다(세지 않아도 되게). */
+.freehead{font-size:12px;color:var(--dim);font-weight:600;padding:2px 3px 7px}
+.freehead b{color:var(--green-d);font-weight:800}
+
+/* ── 「내원 전」 칸 — 스크롤해도 **따라다닌다** ────────────────────────
+ * 🔴 다른 칸(완료 등)은 수십 장이라 길게 내려가는데, 「내원 전」은 그동안
+ *    위에 남아 있어야 한다(2026-10-06 사용자 지시). 데스크가 완료를 훑다가도
+ *    「다음에 올 사람」을 바로 볼 수 있어야 하기 때문이다.
+ * ⚠️ `position:sticky` 는 **부모가 넘치지 않아야** 듣는다. 칸 자체(.col)를
+ *    sticky 로 만들면 격자 한 칸 안에서만 붙으므로, 안쪽 상자를 붙인다.
+ *    top 은 헤더(--hdr) + 칼럼 제목 높이만큼 띄운다. */
+.col[data-col=before] .drop{position:sticky;top:calc(var(--hdr) + 46px);
+  max-height:calc(100vh - var(--hdr) - 60px);overflow:auto;
+  /* 스크롤 막대가 카드와 겹치지 않게 살짝 띄운다. */
+  padding-right:2px}
+
+/* 시간대 머리 — 지금 보고 있는 30분 구간. */
+.slothead{display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+  padding:2px 2px 8px;font-size:13px}
+.slothead b{font-size:14px;font-weight:800;letter-spacing:-.3px;
+  font-variant-numeric:tabular-nums}
+/* ⚠️ 11px 이상을 지킨다(2026-10-07) — 10.5px 은 서서 볼 때 안 읽혔다. */
+.slothead .nowtag{font-size:11px;font-weight:800;color:#fff;background:var(--blue);
+  border-radius:6px;padding:1px 6px}
+.slothead .backnow{font-weight:700;font-size:11px;color:var(--blue-d);
+  background:var(--blue-bg);border:1px solid #cfe3ff;border-radius:6px;
+  padding:2px 7px;cursor:pointer}
+.slothead .backnow:hover{background:#dceaff}
+.slothead .allc{margin-left:auto;font-size:11.5px;color:var(--dim)}
+/* 지각 묶음 표시 — 안 온 사람 수. 빨강은 「전화할 일」이라는 뜻이다. */
+.slothead .latetag{font-size:10.5px;font-weight:800;color:#fff;background:var(--red);
+  border-radius:6px;padding:1px 6px}
+
+/* 위/아래 화살표 — 예약이 있는 시간대로 건너뛴다. */
+.slotnav{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;
+  border:1px solid var(--line);background:#fbfcfd;border-radius:9px;
+  padding:7px 8px;cursor:pointer;color:#4e5968;font-weight:600;font-size:12px;
+  margin-bottom:7px}
+.slotnav:last-child{margin:7px 0 0}
+.slotnav:hover:not(:disabled){background:#f2f4f6;color:var(--tx);border-color:#cfd6dd}
+.slotnav:disabled{color:var(--dim2);cursor:default;background:transparent;
+  border-style:dashed}
+.slotnav .ar{font-size:11px;line-height:1}
+.slotnav .lb{font-variant-numeric:tabular-nums}
+.slotbody{min-height:40px}
+
+/* vv: morning nav 숨김 */
+nav#nav{display:none!important}
+.main{margin-left:0!important}
+</style>
+
+<body>
+<!-- 🔴 좌측 탭 정의가 먼저 와야 한다 — app-shared.js 가 MFNAV 를 쓴다. -->
+<script>
+/* ── 인라인: /app-nav.js ── */
+/* 좌측 탭 — **모든 화면이 함께 쓰는 단 하나의 메뉴 정의.**
+ *
+ * 🔴 **메뉴는 여기서만 고친다**(2026-10-06 사용자 지시 "좌측 탭 메뉴들을 각 페이지들이
+ *    공통으로 공용으로 활용하도록"). 예전에는 `/app`(app_page.html)과 공통 껍데기
+ *    (app_shared.js)가 메뉴를 **각자** 들고 있었다. 그래서 한쪽에만 메뉴를 더하면
+ *    화면마다 좌측이 달라졌다 — 실제로 「리콜 업무」를 두 번 따로 넣어야 했다.
+ *
+ * ⚠️ **전역 이름을 만들지 않는다.** `/app` 은 자기 `$`·`esc` 를 top-level `const` 로
+ *    들고 있다. 이 파일이 같은 이름을 top-level 에 또 선언하면
+ *    `Identifier '$' has already been declared` 로 **화면이 통째로 죽는다.**
+ *    그래서 전부 IIFE 안에 가두고 `window.MFNAV` 하나만 내보낸다.
+ */
+(function () {
+  'use strict';
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  /* 접수·문진 디자인 후보 — **비교용 주소**(/app-v2 …)에서만 좌측에 펼친다.
+     🔴 `/app` 과 `/test/…` 에서는 펼치지 않는다. 거기선 완성된 한 화면을 보는
+        자리라, V 목록이 뜨면 「다른 앱인가」로 읽힌다.
+     ⚠️ `/app` 은 이제 **v2 와 같은 파일**을 내린다(2026-10-06 승격). 그래서
+        화면이 넘겨 주는 version 만 보고 목록을 펴면 `/app` 에서도 펼쳐진다 —
+        **주소로** 판정해야 한다(아래 `onCompare`). */
+  var VERSIONS = [
+    { id: 'v1', href: '/clinic/reception', name: '기본 칸반', tag: 'V1',
+      desc: '현재 운영본 — 개선 칸반' },
+    { id: 'v2', href: '/app-v2', name: '개선 칸반', tag: 'V2',
+      desc: '같은 칸반을 고쳐 쓴 판 — <b>체어 이름 · 문진 경고 범위 · 고정 헤더 · 완료 접기</b>' },
+    { id: 'v3', href: '/app-v3', name: '도트 보드', tag: 'V3',
+      desc: '환자 1명 = 점 1개. <b>혼잡도를 점의 양과 색으로</b> 보고, 올리면 그 환자만 펼친다' },
+  ];
+
+  /* 「프로토타입」 그룹 — `관리` 그룹 **뒤**에 둔다(2026-10-06 사용자 지시).
+     🔴 1안(개선 칸반)은 **운영본 `/app` 으로 승격**되어 여기서 뺐다(2026-10-06).
+        같은 화면을 두 주소로 두면 「어느 게 진짜인가」가 생긴다. */
+  var PROTOS = [
+    { href: '/test/reception-intake-2', name: '접수 문진 2안', ver: 'v3' },
+  ];
+
+  var HERE = location.pathname;
+  var protoHere = PROTOS.filter(function (p) { return p.href === HERE; })[0] || null;
+  /* 🔴 **버전 목록을 펼 자리인가** — 주소로만 정한다.
+     `/app-v2` · `/app-v3` 같은 비교용 주소에서만 편다. `/app` 은 운영본이고
+     `/test/…` 는 완성된 한 안이라, 둘 다 펴지 않는다. */
+  var onCompare = /^\/app-v\d+$/.test(HERE);
+
+  function a(cls, href, label, extra) {
+    return '<a class="' + cls + '"' + (href ? ' href="' + href + '"' : '')
+      + (extra || '') + '>' + label + '</a>';
+  }
+
+  /** 좌측 탭 HTML.
+   *  @param opt.active  'flow'(접수·문진) | 'slots'(예약 가능 시간) | null
+   *  @param opt.version 비교용 주소일 때만 'v1'~'v3' — 주면 그 아래 버전 목록을 편다.
+   */
+  function html(opt) {
+    opt = opt || {};
+    var cur = opt.version || null;
+    // 버전 목록은 **비교용 주소에서만**(주소로 판정 — /app 도 이제 v2 파일이다).
+    var showVers = onCompare;
+    var onFlow = opt.active === 'flow';
+    var onSlots = opt.active === 'slots';
+
+    var vers = showVers ? VERSIONS.map(function (x) {
+      return a('ver' + (x.id === cur ? ' on' : ''), x.href,
+        esc(x.name) + '<span class="vt">' + x.tag + '</span>');
+    }).join('') : '';
+
+    var protos = PROTOS.map(function (p) {
+      return a('sub' + (p.href === HERE ? ' on' : ''), p.href, esc(p.name));
+    }).join('');
+
+    // ⚠️ `showVers` 가 참이어도 `cur` 이 없을 수 있다(주소는 /app-v9 인데 화면이
+    //    version 을 안 넘긴 경우). `[0].href` 를 그냥 쓰면 undefined 로 터진다.
+    var curV = VERSIONS.filter(function (v) { return v.id === cur; })[0];
+    var flowHref = (showVers && curV) ? curV.href : '/clinic/reception';
+    return ''
+      + '<button class="navx" id="navx" title="닫기" aria-label="메뉴 닫기">✕</button>'
+      + '<div class="brand"><b>morning.</b><span>좋은 진료의 시작</span></div>'
+      // 🔴 그룹 이름은 **전부 같은 모양**이다(사용자 지시 2026-10-07).
+      //    예전엔 「진료 · 환자관리」·「리콜 업무」만 `a.parent`(누를 수 있는 링크)이고
+      //    「관리」·「프로토타입」은 `div.grp` 였다 — 같은 층인데 글씨 크기도 색도
+      //    달라 어디까지가 한 묶음인지 매번 다시 읽어야 했다.
+      //    ⚠️ 「진료 · 환자관리」를 링크에서 뺐다. 눌러도 바로 아래 「접수 · 문진」과
+      //       같은 곳으로 가던 중복이라, 빼도 갈 수 있는 곳이 줄지 않는다.
+      //    ⚠️ 'WORKSPACE' 는 없앴다 — 그룹 위에 또 그룹이라 층이 하나 더 보였다.
+      + '<div class="grp">진료 · 환자관리</div>'
+      + a('sub' + (onFlow ? ' on' : ''), flowHref,
+          '접수 · 문진 <span class="cnt" id="navCnt">0</span>')
+      + vers
+      // 🔴 아직 만들지 않은 메뉴는 **비활성**으로 둔다 — 눌러서 빈 화면이 뜨면
+      //    「고장났다」로 읽힌다. 만든 것만 들어갈 수 있게 한다.
+      + a('sub off', '', '문의 · 요청', ' title="아직 준비 중이에요"')
+      + a('sub off', '', '체어브리핑 · 자료', ' title="아직 준비 중이에요"')
+      + a('sub off', '', '상담 · 치료계획', ' title="아직 준비 중이에요"')
+      + a('sub off', '', '환자 차트', ' title="아직 준비 중이에요"')
+      // 리콜 업무 — 「진료 · 환자관리」와 나란한 그룹. 참고 화면: 통합웹 #/D/slots.
+      + '<div class="grp">리콜 업무</div>'
+      + a('sub' + (onSlots ? ' on' : ''), '/recall/slots', '예약 가능 시간')
+      + '<div class="grp">관리</div>'
+      // 「접수 · 문진」·「예약 가능 시간」과 **같은 모양**으로 둔다(사용자 지시 2026-10-07).
+      // sub 는 왼쪽 점(:before)을 달아 주는 클래스다 — 메뉴 항목이라는 신호가
+      // 화면마다 달라 보이면 같은 줄인지 아닌지 매번 다시 읽게 된다.
+      // ⚠️ 활성(on) 표시는 붙이지 않는다 — 두 화면은 **이 nav 를 쓰지 않는다**
+      //    (/management/ops 는 자체 HTML, /api/docs 는 Swagger). 거기선 좌측 탭이
+      //    아예 안 보이므로, 활성 판정을 넣어도 영영 실행되지 않는 죽은 코드가 된다.
+      + a('sub', '/management/ops', '운영 점검')
+      + a('sub', '/api/docs', 'API 문서')
+      // 키오스크 — 🔴 **환자가 보는 화면**이라 새 창으로 띄운다. 같은 창에서 열면
+      //    직원이 좌측 탭으로 돌아올 수 없고(키오스크는 nav 를 안 띄운다),
+      //    환자 앞 화면에 직원 메뉴가 그대로 남는 사고로 이어진다.
+      // 🔴 **HTTPS 로 연다**(2026-10-07 사용자 지시). 평문 HTTP 로 열면 브라우저가
+      //    카메라를 막아 얼굴 인식이 **아예 안 된다** — 보안 컨텍스트가 아니기 때문이다.
+      + a('sub', kioskHref(), '키오스크', ' target="_blank" rel="noopener"')
+      + '<div class="grp">프로토타입</div>'
+      + protos;
+  }
+
+  /** 키오스크 주소 — **HTTPS 로** 연다.
+   *
+   *  🔴 카메라(`getUserMedia`)는 **보안 컨텍스트**(HTTPS·루프백)에서만 동작한다.
+   *     좌측 탭이 평문 HTTP 로 열어 주면 그 창에선 얼굴 인식이 **영영 안 된다**.
+   *  🔴 **IP 를 박지 않는다.** 이 앱은 치과 1곳당 1대로 깔리므로 `192.168.0.236` 을
+   *     박으면 다른 치과에서 **남의 병원 서버**로 가 버린다 — 지금 호스트로 만든다.
+   *  ⚠️ 이미 HTTPS 면 상대 경로가 낫다(포트가 붙은 주소도 그대로 살린다).
+   *  ⚠️ 루프백(127.0.0.1)에서는 HTTPS 로 바꾸지 않는다 — 거기선 평문이어도
+   *     카메라가 열리고, 443 에 nginx 가 없을 수도 있다.
+   *  ⚠️ HTTPS 로 바꿀 때 **포트를 버린다**(7331 → 443). 리버스 프록시가 443 에서
+   *     받아 7331 로 넘기는 구조라, 포트를 들고 가면 그런 주소는 없다.
+   */
+  function kioskHref() {
+    var PATH = '/management/kiosk';
+    if (location.protocol === 'https:') return PATH;
+    var h = location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1') return PATH;
+    return 'https://' + h + PATH;
+  }
+
+  /** `<nav id="nav">` 를 찾아 좌측 탭을 **채워 넣는다**(없으면 만들지 않는다). */
+  /** 지금 선 **주소**로 켜진 자리를 정한다 — 'flow' | 'slots' | null.
+   *
+   *  🔴 화면이 자기가 어디인지 넘기는 방식은 **거짓말이 된다.** 프로토타입
+   *     (`/test/…`, `/app-v3`)에 들어가 있어도 「접수 · 문진」이 켜져 있었다.
+   *     주소가 유일한 진실이다.
+   *  ⚠️ `/app-v2` 는 운영본과 같은 파일이지만 **비교용 주소**다 — 좌측의
+   *     「접수 · 문진」이 아니라 아래 버전 목록이 켜진다(VERSIONS 쪽에서 처리).
+   */
+  function activeHere() {
+    if (/^\/recall\/slots/.test(HERE)) return 'slots';
+    if (HERE === '/clinic/reception') return 'flow';
+    return null;
+  }
+
+  function mount(opt) {
+    var nav = document.getElementById('nav');
+    if (nav) nav.innerHTML = html(opt);
+    return nav;
+  }
+
+  /** 「접수 · 문진」 옆 대기 인원 뱃지를 채운다.
+   *
+   *  🔴 접수 데이터를 **안 쓰는 화면**(예: 예약 가능 시간)도 뱃지는 맞아야 한다.
+   *     화면마다 다른 숫자가 보이면 어느 쪽이 맞는지 판정할 수 없다.
+   *     접수 화면들은 자기가 이미 받은 데이터로 `set()` 을 불러 덮어쓰고,
+   *     안 쓰는 화면은 `fill()` 이 한 번 조회해 채운다.
+   *  ⚠️ 실패해도 **조용히 둔다** — 뱃지 하나 때문에 본문에 오류를 띄우지 않는다.
+   */
+  function setCount(n) {
+    var el = document.getElementById('navCnt');
+    if (el) el.textContent = String(n);
+  }
+  function fillCount() {
+    fetch(API('/api/app/flow')).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.ok || !j.data) return;
+      var rows = j.data.receptions || [];
+      // 🔴 접수 화면들과 **같은 셈법**이어야 한다: 대기(status 0·1) + 진료 중(status 2).
+      //    status 3 은 수납 대기, 4 는 완료라 뱃지에 넣지 않는다
+      //    (app_shared.js 의 STAGES 정의가 원천 — 여기서 따로 정하지 않는다).
+      var n = rows.filter(function (r) { return r.status <= 2; }).length;
+      setCount(n);
+    }).catch(function () { /* 뱃지는 없어도 화면은 돈다 */ });
+  }
+
+  window.MFNAV = {
+    html: html, mount: mount, esc: esc, activeHere: activeHere, kioskHref: kioskHref,
+    setCount: setCount, fillCount: fillCount,
+    VERSIONS: VERSIONS, PROTOS: PROTOS,
+    HERE: HERE, protoHere: protoHere,
+  };
+})();
+
+</script>
+<script>
+/* ── 인라인: /app-shared.js ── */
+/* 접수·문진 화면 공통 로직 — 데이터 · 껍데기 · 모달.
+ *
+ * 🔴 **이 파일은 판정하지 않는다.** 단계 분류는 덴트웹 `n상태` 가 정하고 화면은
+ *    따라 그린다(서버 `app_page.rs` 주석과 같은 규칙). 여기서 하는 일은
+ *    여러 버전 화면이 **똑같은 해석**을 쓰게 모아 두는 것뿐이다.
+ *
+ * 🔴 버전이 늘어도 해석이 갈라지면 안 된다. 「체어 이름」·「문진 없음을 누구에게
+ *    붙이나」 같은 판단이 화면마다 다르면, 같은 환자가 화면마다 달라 보인다.
+ *    실제로 v1 에서 그 사고가 났다(아래 chairName · needsIntake 주석 참고).
+ */
+(function (w) {
+'use strict';
+
+const MF = w.MF = {};
+
+/* ── 작은 도구 ──────────────────────────────────────────────────────── */
+const $ = MF.$ = id => document.getElementById(id);
+const esc = MF.esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const digits = MF.digits = s => String(s || '').replace(/\D/g, '');
+const pad2 = n => String(n).padStart(2, '0');
+
+/** 'YYYYMMDDHHmmss' → 'HH:MM' */
+MF.hm = s => (s && String(s).length >= 12)
+  ? String(s).slice(8, 10) + ':' + String(s).slice(10, 12) : '';
+/** 'HHMM' → 'HH:MM' */
+MF.hm4 = s => (s && String(s).length === 4)
+  ? String(s).slice(0, 2) + ':' + String(s).slice(2, 4) : '';
+/** 접수·예약 중 **있는 쪽**의 시각. 카드마다 다른 규칙을 쓰면 줄이 안 맞는다. */
+MF.timeOf = r => MF.hm(r.receivedAt) || MF.hm4(r.appointmentTime);
+
+/** 'YYYYMMDDHHmmss' → Date (로컬). 못 읽으면 null. */
+function toDate(s) {
+  const d = digits(s);
+  if (d.length < 12) return null;
+  const t = new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8),
+                     +d.slice(8, 10), +d.slice(10, 12), +(d.slice(12, 14) || 0));
+  return isNaN(t) ? null : t;
+}
+MF.toDate = toDate;
+
+/** 접수 후 **지금까지** 몇 분. 하루를 넘기면(1440분) 값이 깨진 것으로 보고 버린다. */
+MF.waitedMin = function (r) {
+  const d = toDate(r.receivedAt);
+  if (!d) return null;
+  const m = Math.floor((Date.now() - d) / 60000);
+  return (m >= 0 && m < 1440) ? m : null;
+};
+/** 진료 시작 후 경과(진료 중) 또는 진료에 걸린 시간(완료). */
+MF.treatMin = function (r) {
+  const s = toDate(r.treatStartAt);
+  if (!s) return null;
+  const e = toDate(r.treatEndAt) || new Date();
+  const m = Math.floor((e - s) / 60000);
+  return (m >= 0 && m < 1440) ? m : null;
+};
+/** 분 → '1시간 20분' / '35분'. 숫자만 쓰면 20 과 200 이 같은 무게로 읽힌다. */
+MF.dur = function (m) {
+  if (m === null || m === undefined) return '';
+  if (m < 60) return m + '분';
+  return Math.floor(m / 60) + '시간' + (m % 60 ? ' ' + (m % 60) + '분' : '');
+};
+
+/** 저장은 UTC, 화면은 KST — 그냥 자르면 아침 9시 이전이 전날로 밀린다. */
+MF.kstFull = function (utc) {
+  if (!utc) return '';
+  const t = String(utc).replace(' ', 'T');
+  const d = new Date(/[Zz+]/.test(t) ? t : t + 'Z');
+  if (isNaN(d)) return String(utc);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} `
+       + `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+};
+
+/* ── 단계 ───────────────────────────────────────────────────────────── */
+/* 🔴 「내원 전」은 **넣지 않는다.** v1 에는 `has: () => false` 인 칸이 있어
+      가로폭 1/5 를 영구히 「없음」으로 점유했다. 들어올 데이터가 생기면
+      그때 칸을 만든다 — 빈 칸을 미리 비워 두지 않는다. */
+/* 🔴 칸 이름과 `n상태` 숫자의 대응은 **덴트웹 원본값**이다. 앱이 재해석하지 않는다.
+     0·1 대기 / 2 진료 중 / 3 진료완료(수납 전) / 4 수납완료.
+     ⚠️ 2026-10-07 사용자 교정: 3 을 「수납 대기」로 부르던 것을 **「진료완료」**로,
+        4 를 「완료 및 문의」→「수납완료 및 문의」를 거쳐 **「수납완료」**로 줄였다.
+        이름만 바뀐 게 아니라 **뜻이 분명해진 것**이다 — 3 은 진료가 끝났고 수납이
+        남은 상태, 4 는 수납까지 끝난 상태다. 되돌리지 말 것. */
+const STAGES = MF.STAGES = [
+  { key: 'wait', t: '접수 · 대기', short: '대기', color: '#f59e0b', bg: '#fff6e5',
+    has: r => r.status === 0 || r.status === 1 },
+  { key: 'in',   t: '진료 중',    short: '진료', color: '#3182f6', bg: '#eff6ff',
+    has: r => r.status === 2 },
+  { key: 'pay',  t: '진료완료',   short: '진료완료', color: '#7c3aed', bg: '#f3efff',
+    has: r => r.status === 3 },
+  { key: 'done', t: '수납완료',   short: '수납완료', color: '#00875a', bg: '#e7f7f0',
+    has: r => r.status === 4 },
+];
+MF.stageOf = r => (STAGES.find(s => s.has(r)) || STAGES[0]).key;
+MF.stage = k => STAGES.find(s => s.key === k);
+
+/* ── 체어 ───────────────────────────────────────────────────────────── */
+/* 🔴 **chairId 를 화면에 그대로 찍지 않는다.** 실측(2026-10-06): chairId 9 의
+      이름은 「6번」이다. v1 은 카드 태그에 raw id 를 찍어 `체어 9` 로 보였는데,
+      같은 화면의 「진료 중」 칸은 이름(`6번`)으로 그렸다 — 한 화면에 두 체계가
+      공존했다. 직원이 「9번 체어로 가세요」 하면 **없는 방**을 찾게 된다.
+      그래서 이름을 모르면 차라리 「체어 미상」이라 적고 번호를 지어내지 않는다. */
+MF.CHAIRS = [];
+const chairMap = new Map();
+MF.chairName = function (id) {
+  const k = String(id ?? '');
+  if (!k || k === '0') return '';
+  return chairMap.get(k) || ('체어 ' + k + '(미등록)');
+};
+/** 진료실 체어인가 — 엑스레이실은 자리를 차지하지만 「진료 체어」가 아니다.
+ *  가동률을 셀 때 섞으면 빈 체어가 과장된다. */
+MF.isRoom = ch => /엑스레이|x-?ray/i.test(ch.name || '');
+
+/* ── 문진 ───────────────────────────────────────────────────────────── */
+/* 🔴 **진료가 끝난 환자에게 「문진 없음」을 경고하지 않는다.** 실측(2026-10-06):
+      v1 은 완료 91 장 **전부**에 빨간 「문진 없음」을 붙였다. 경고색이 모든 행에
+      있으면 그건 경고가 아니라 배경이다. 게다가 같은 화면의 KPI 는 0 건이라고
+      말했다(KPI 는 status<=2 만 셌다) — 한 화면이 서로 다른 말을 했다.
+      문진은 **진료 전에 받아야 쓸모가 있다.** 그래서 대상도 진료 전으로 맞춘다. */
+MF.needsIntake = (r, ck) => !ck && r.status <= 2;
+
+/* ── 담당의 ─────────────────────────────────────────────────────────── */
+/* 덴트웹 진료내용에 `/dr.정/담비, 효정` 꼴로 들어온다(실측). 별도 필드가 없어
+ * 여기서 뽑는다. ⚠️ 못 뽑으면 **빈 값**이다 — doctorId 를 이름인 양 쓰지 않는다. */
+MF.doctorOf = function (r) {
+  const m = /dr\.\s*([가-힣A-Za-z]{1,6})/i.exec(r.treatmentDetail || '');
+  return m ? m[1] : '';
+};
+
+/* ── 나이 ───────────────────────────────────────────────────────────── */
+MF.ageOf = function (r) {
+  const b = digits(r.birthDate);
+  if (b.length < 8) return null;
+  const y = +b.slice(0, 4), mo = +b.slice(4, 6), d = +b.slice(6, 8);
+  const n = new Date();
+  let a = n.getFullYear() - y;
+  if (n.getMonth() + 1 < mo || (n.getMonth() + 1 === mo && n.getDate() < d)) a--;
+  return (a >= 0 && a < 130) ? a : null;
+};
+
+/* ── 데이터 ─────────────────────────────────────────────────────────── */
+/* 🔴 접수·문진·알림톡을 **한 번에** 받는다(서버 `/api/app/flow` 가 합본으로 내린다).
+      따로 부르면 그 사이에 상태가 바뀌어 서로 다른 시점이 섞인다.
+
+   ⚠️ **API 주소는 반드시 `/` 로 시작한다.** 상대경로(`api/…`)로 적으면 지금 선
+      주소의 **디렉터리** 기준으로 풀린다 — `/app-v2` 에서는 `/api/…` 로 맞지만
+      `/test/reception-intake-1` 에서는 `/test/api/…` 가 되어 전부 404 다.
+      같은 화면이 주소에 따라 데이터만 안 나오는, 가장 찾기 어려운 실패다. */
+MF.load = async function () {
+  if (!MF.CHAIRS.length) {
+    try {
+      const cr = await (await fetch(API('/api/dw/chairs'))).json();
+      if (cr.ok) {
+        MF.CHAIRS = cr.data || [];
+        chairMap.clear();
+        for (const c of MF.CHAIRS) chairMap.set(String(c.chairId), c.name);
+      }
+    } catch (_) { /* 체어를 못 받아도 화면 전체가 죽지는 않게 둔다 */ }
+  }
+  const j = await (await fetch(API('/api/app/flow'))).json();
+  if (!j.ok) { const e = new Error(j.error || '조회 실패'); e.code = j.code; throw e; }
+  const d = j.data;
+  const rows = d.receptions || [];
+  const ckBy = new Map();
+  for (const c of (d.checkins || [])) {
+    const k = String(c.patientRef ?? c.patient_ref ?? '');
+    if (k) ckBy.set(k, c);
+  }
+  const noticeBy = new Set((d.noticeSent || []).map(n => String(n.patientId)));
+  return { date: d.date, rows, ckBy, noticeBy };
+};
+
+/** 단계별 개수 + 문진 미실시 수. 모든 버전이 같은 숫자를 쓰게 한 곳에서 센다. */
+MF.counts = function (s) {
+  const c = {};
+  for (const st of STAGES) c[st.key] = s.rows.filter(st.has).length;
+  c.total = s.rows.length;
+  c.noIntake = s.rows.filter(r => MF.needsIntake(r, s.ckBy.get(String(r.patientId)))).length;
+  c.longWait = s.rows.filter(r => {
+    const m = MF.waitedMin(r);
+    return r.status <= 1 && m !== null && m >= 20;
+  }).length;
+  return c;
+};
+
+/* ── 껍데기(좌측 탭 · 헤더) ─────────────────────────────────────────── */
+/* 🔴 **좌측 탭 정의는 여기 없다.** `app_nav.js`(window.MFNAV) 한 곳에만 둔다 —
+      `/app` 과 이 공통 껍데기가 메뉴를 각자 들고 있어서, 메뉴를 더할 때마다
+      두 곳을 고쳐야 했고 실제로 화면마다 좌측이 달라졌다(2026-10-06). */
+const VERSIONS = MF.VERSIONS = MFNAV.VERSIONS;
+const PROTOS = MF.PROTOS = MFNAV.PROTOS;
+const HERE = MFNAV.HERE;
+
+/** 좌측 탭 + 헤더를 그린다. 각 화면은 본문(보드)만 책임진다.
+ *
+ * ⚠️ `document.body` 가 **없을 수 있다.** 이 함수는 `<script>` 에서 바로 불리는데,
+ *    페이지에 body 요소가 아직 없으면(스크립트가 본문보다 앞설 때) null 이다 —
+ *    그대로 쓰면 `insertAdjacentHTML of null` 로 화면이 통째로 비어 버린다.
+ *    (실측 2026-10-06: 후보 화면 5개가 전부 백지였다.)
+ */
+MF.shell = function (opt) {
+  const cur = opt.version;
+  const v = VERSIONS.find(x => x.id === cur);
+  // 프로토타입으로 들어왔으면 머리말도 **그 탭 이름**으로 말한다 —
+  //   좌측은 「접수 문진 1안」이 켜져 있는데 머리말만 「개선 칸반」이면 서로 안 맞는다.
+  const protoHere = MFNAV.protoHere;
+  const crumbHtml = opt.crumb
+    ? esc(opt.crumb).replace(' · ', ' › ')
+    : protoHere
+      ? '프로토타입 › <b style="color:var(--tx)">' + esc(protoHere.name) + '</b>'
+      : '진료·환자관리 › <b style="color:var(--tx)">접수·문진</b>'
+        + '<b style="color:var(--dim)"> · ' + esc(v ? v.name : '') + '</b>';
+  // 좌측 탭은 **공용 정의**가 만든다. 켜진 자리와 버전만 알려 준다.
+  // 🔴 활성 표시는 **지금 선 주소**로만 정한다(사용자 지시 2026-10-07).
+  //    예전엔 `v ? 'flow'` 였는데, 그러면 버전을 넘기는 화면이면 **프로토타입에
+  //    들어가 있어도** 「접수 · 문진」이 계속 파랗게 켜져 있었다 — 어디에 있는지
+  //    화면이 거짓으로 말하는 셈이다. 실제로 켜진 주소일 때만 켠다.
+  const navHtml = MFNAV.html({ active: opt.nav || MFNAV.activeHere(), version: cur });
+  if (!document.body) document.documentElement.appendChild(document.createElement('body'));
+  document.body.insertAdjacentHTML('afterbegin', `
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div id="modal"></div>
+<div class="scrim" id="scrim"></div>
+<nav id="nav">${navHtml}</nav>
+<div class="main">
+  <header>
+    <button class="burger" id="burger" title="메뉴" aria-label="메뉴 열기"
+      aria-controls="nav" aria-expanded="false">☰</button>
+    <span class="crumb">${crumbHtml}</span>
+    <span class="sp"></span>
+    <span class="freshen" id="fresh"></span>
+    <span id="conn"></span>
+    <!-- 🔴 지금 덴트웹 접속 계정은 조회 전용이다. 「고칠 수 있다」고 보이게 두면
+         매번 실패할 조작을 매번 초대하게 된다 — 처음부터 밝힌다. -->
+    <span class="chip ro" title="덴트웹 접속 계정이 winsa_readonly 라 쓰기가 나가지 않습니다">조회 전용</span>
+    <div class="tool" id="tool">
+      <button class="iconbtn" id="reload" title="새로고침">⟳</button>
+    </div>
+  </header>
+  <main id="page"></main>
+</div>`);
+
+  // 모바일 서랍
+  const navOpen = on => {
+    $('nav').classList.toggle('open', on);
+    $('scrim').classList.toggle('show', on);
+    $('burger').setAttribute('aria-expanded', on ? 'true' : 'false');
+    document.body.classList.toggle('navlock', on);
+  };
+  $('burger').onclick = () => navOpen(true);
+  $('navx').onclick = () => navOpen(false);
+  $('scrim').onclick = () => navOpen(false);
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', () => { if (!a.classList.contains('off')) navOpen(false); });
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && $('nav').classList.contains('open')) navOpen(false);
+  });
+  addEventListener('resize', () => { if (innerWidth > 720) navOpen(false); });
+
+  /* 롤백 버튼 — **모든 화면의 헤더**에 둔다(2026-10-06 사용자 지시).
+   *
+   * 🔴 작업 이력은 **페이지에 묶이지 않는다.** `write_audit` 는 모닝 앱이
+   *    덴트웹에 쓴 것을 전부 모으는 전역 원장이고(`target`·`table_name` 으로
+   *    어디에 쓴 것인지 구분한다), `/api/app/audit` 도 페이지 필터 없이
+   *    최근순 전체를 내린다. 그러니 **어느 화면에서 되돌려도 같은 목록**이다.
+   *    예전에는 이 버튼을 접수·문진 화면에만 붙여 둬서, 다른 화면에서 쓴 작업을
+   *    되돌리려면 접수 화면으로 돌아가야 했다 — 버튼 위치의 문제였지
+   *    기록 범위의 문제가 아니었다.
+   */
+  $('tool').insertAdjacentHTML('afterbegin',
+    '<button class="btn2" id="rollback" title="작업 이력 · 롤백">↩ 롤백</button>');
+  $('rollback').onclick = MF.openRollback;
+
+  return $('page');
+};
+
+/** 버전 설명 띠 — 본문 맨 위에 붙인다. */
+MF.vbar = function (id) {
+  const v = VERSIONS.find(x => x.id === id);
+  if (!v) return '';
+  return `<div class="vbar"><span class="vn">${v.tag}</span>
+    <span class="vd">${v.desc}</span></div>`;
+};
+
+/* ── 갱신 ───────────────────────────────────────────────────────────── */
+/* 🔴 10초마다 조용히 갈아끼우면 「멈춘 화면」과 구분되지 않는다. 마지막으로
+      서버와 통한 시각을 늘 띄우고, 실패하면 그 사실을 바로 말한다. */
+let lastOk = null, failN = 0;
+MF.markFresh = function (ok) {
+  const el = $('fresh');
+  if (!el) return;
+  if (ok) { lastOk = new Date(); failN = 0; }
+  else failN++;
+  if (!lastOk) { el.textContent = ''; return; }
+  const t = `${pad2(lastOk.getHours())}:${pad2(lastOk.getMinutes())}:${pad2(lastOk.getSeconds())}`;
+  el.innerHTML = failN
+    ? `<b style="color:var(--red-d)">갱신 실패 ${failN}회</b> · 마지막 ${t}`
+    : `갱신 <b>${t}</b>`;
+};
+MF.setConn = function (ok, msg) {
+  const el = $('conn');
+  if (el) el.innerHTML = ok ? '<span class="chip">덴트웹 연결됨</span>'
+                            : `<span class="chip no">${esc(msg || '덴트웹 끊김')}</span>`;
+};
+
+/** 10초 폴링. ⚠️ 모달이 열려 있으면 **본문을 다시 그리지 않는다** — 보고 있던
+ *  이력이 눈앞에서 사라지면 다시 찾아 들어가야 한다. */
+MF.poll = function (fn, ms) {
+  const btn = $('reload');
+  const run = async spin => {
+    if (spin && btn) btn.classList.add('spin');
+    try { await fn(); MF.markFresh(true); }
+    catch (e) { MF.markFresh(false); throw e; }
+    finally { if (btn) btn.classList.remove('spin'); }
+  };
+  if (btn) btn.onclick = () => run(true).catch(() => {});
+  run(true).catch(() => {});
+  setInterval(() => {
+    if ($('modal').innerHTML) return;   // 모달이 열려 있으면 건너뛴다
+    run(false).catch(() => {});
+  }, ms || 10000);
+};
+
+/* ── 중앙 경고 ──────────────────────────────────────────────────────── */
+let toastT = null;
+MF.toast = function (msg, sub, ms) {
+  const el = $('toast');
+  el.innerHTML = esc(msg) + (sub ? `<span class="s">${esc(sub)}</span>` : '');
+  el.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), ms || 1400);
+};
+
+/* ── 환자 히스토리 ──────────────────────────────────────────────────── */
+/* 🔴 **보내는 쪽(앱)을 오른쪽 노란 말풍선**으로, 받는 쪽(환자·덴트웹)을 왼쪽에.
+      누가 한 일인지가 색과 위치로 바로 보여야 「우리가 보낸 것」과
+      「환자가 한 것」을 헷갈리지 않는다. */
+/* 🔴 **주고받은 말**과 **진료 기록**은 생김새가 달라야 한다.
+ *
+ * 전에는 전부 말풍선이었다. 그래서 「수납 3,900원」이나 「발치 #18,48」까지
+ * 카톡처럼 떠서, 환자가 한 말인지 우리가 한 처치인지 구분이 안 됐다.
+ * 말(알림톡·문진·요청)만 말풍선으로 두고, 덴트웹 기록은 **표 같은 줄**로 적는다.
+ * (운영본 `/app` 에서 쓰던 방식을 공용으로 올렸다 — 2026-10-06. 화면마다
+ *  히스토리가 다르게 보이면 같은 환자를 두고 다른 판단을 하게 된다.)
+ */
+const MSG_KINDS = new Set(['알림톡', '자동메시지', '링크발급', '문진', '환자요청']);
+
+/** 말풍선 — 보낸 쪽(앱)은 오른쪽 노란색, 받은 쪽은 왼쪽. */
+function bubble(it, t) {
+  const mine = it.who === '앱';
+  const dw = it.who === '덴트웹';
+  return `<div class="bub ${mine ? 'me' : ''} ${dw ? 'dw' : ''}">
+    <div class="av">${esc(it.who)}</div>
+    <div class="wrap2">
+      ${mine ? '' : `<div class="who">${esc(it.who)}</div>`}
+      <div class="msg2"><span class="kindtag">${esc(it.kind)}</span>${esc(it.text || '')}</div>
+      <div class="tm2">${esc(t)}</div>
+    </div></div>`;
+}
+
+/** 진료 기록 한 줄 — 시각 · 종류 · 제목(치식) · 본문 · 담당. */
+function record(it, t) {
+  // 진료 시작/끝은 흐름의 매듭이라 따로 표시한다(체어가 붙는 줄이다).
+  const flow = it.sub === 'start' || it.sub === 'end';
+  const bits = [];
+  if (it.tooth) bits.push(`<span class="tooth">${esc(it.tooth)}</span>`);
+  if (it.chair) bits.push(`<span class="rmeta">${esc(it.chair)}</span>`);
+  // ⚠️ 담당자 이름은 있을 때만 — 덴트웹이 못 주면 「덴트웹」이 내려온다.
+  if (it.who && it.who !== '덴트웹') bits.push(`<span class="rmeta">${esc(it.who)}</span>`);
+  // 「미수」는 수납과 같은 종류지만 **안 받은 돈**이다 — 색을 달리한다.
+  const unpaid = it.title === '미수' || /미수 /.test(it.text || '');
+  return `<div class="rec ${flow ? 'flow' : ''} ${unpaid ? 'unpaid' : ''} k-${esc(it.kind)}">
+    <div class="rtm">${esc(t)}</div>
+    <div class="rbody">
+      <div class="rhead"><span class="kindtag">${esc(it.kind)}</span>
+        <b>${esc(it.title || it.kind)}</b>${bits.join('')}</div>
+      ${it.text ? `<div class="rtext">${esc(it.text)}</div>` : ''}
+    </div></div>`;
+}
+
+MF.openHistory = async function (pid, name) {
+  const m = $('modal');
+  const opener = document.activeElement;
+  m.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><div class="sheet">
+    <div class="mh"><b>${esc(name)}</b>
+      <span style="color:var(--dim);font-size:13px">#${esc(pid)}</span>
+      <span class="sp"></span><button class="x" id="mx" aria-label="닫기">✕</button></div>
+    <div class="mb" id="mb"><div class="noitem">불러오는 중…</div></div>
+  </div></div>`;
+  const close = () => {
+    m.innerHTML = '';
+    // 포커스를 눌렀던 자리로 되돌린다 — 키보드로 쓰면 여기서 길을 잃는다.
+    if (opener && opener.focus) opener.focus();
+  };
+  $('mx').onclick = close;
+  $('mx').focus();
+  m.querySelector('.modal').onclick = e => { if (e.target === e.currentTarget) close(); };
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); }
+  });
+
+  try {
+    const j = await (await fetch(API('/api/app/history?patient=') + encodeURIComponent(pid))).json();
+    const box = $('mb');
+    if (!box) return;
+    if (!j.ok) { box.innerHTML = `<div class="noitem">${esc(j.error || '불러오지 못했어요')}</div>`; return; }
+    const items = j.data.items || [];
+    if (!items.length) {
+      // 🔴 비어 있으면 그대로 말한다 — 없는 이력을 지어내지 않는다.
+      box.innerHTML = `<div class="noitem">아직 기록이 없어요.<br>
+        접수·진료·수납·예약·메모·알림톡이 쌓이면 여기에 시간순으로 보여요.</div>`;
+      return;
+    }
+    // 🔴 **병력은 맨 위에 못 박는다.** 시간순으로 두면 작성일이 오래된 탓에
+    //    맨 아래로 밀린다 — 「혈전용해제 복용중」을 발치 전에 못 보면 사고가 난다.
+    //    ⚠️ 줄을 **옮기는 게 아니라 복사**한다. 시간순 줄기는 그대로 둬야
+    //       「언제 적힌 병력인가」도 읽을 수 있다.
+    const pmh = items.filter(it => it.kind === '병력');
+    let h = pmh.length ? `<div class="pmhbar">${pmh.map(p =>
+      `<span class="pmhchip">${esc(p.text || '')}</span>`).join('')}</div>` : '';
+
+    let lastDay = '';
+    for (const it of items) {
+      const d = fmtDay(it.at), t = fmtTime(it.at);
+      if (d && d !== lastDay) { h += `<div class="day"><span>${esc(d)}</span></div>`; lastDay = d; }
+      h += (MSG_KINDS.has(it.kind) ? bubble : record)(it, t);
+    }
+    box.innerHTML = h;
+    box.scrollTop = box.scrollHeight;   // 최신이 아래 — 바로 보이게
+  } catch (e) {
+    const box = $('mb'); if (box) box.innerHTML = `<div class="noitem">${esc(e.message)}</div>`;
+  }
+};
+function fmtDay(s) { const d = digits(s); return d.length >= 8
+  ? `${d.slice(0, 4)}년 ${+d.slice(4, 6)}월 ${+d.slice(6, 8)}일` : ''; }
+function fmtTime(s) { const d = digits(s); return d.length >= 12
+  ? `${d.slice(8, 10)}:${d.slice(10, 12)}` : ''; }
+
+/* ── 문진 보내기 ────────────────────────────────────────────────────── */
+/* 🔴 발송은 되돌릴 수 없다 — 환자 폰으로 바로 간다. 반드시 한 번 더 묻는다.
+      그리고 결과는 「보냄」이 아니라 「큐에 넣음」이다. 도달은 발송 원장으로만 판정한다. */
+let sending = false;
+MF.sendIntake = async function (pid, name, btn, onMsg) {
+  if (sending) return;
+  if (!confirm(`${name} 님에게 문진 안내를 보냅니다.\n\n보낸 뒤에는 취소할 수 없습니다. 진행할까요?`)) return;
+  sending = true;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '보내는 중…';
+  try {
+    const r = await fetch(API('/api/send/alimtalk'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ purpose: 'autoflow_checkin', items: [{ patientRef: pid, toPhone: '' }] }),
+    });
+    const j = await r.json();
+    if (r.ok) onMsg(true, `큐에 넣었어요 (${j.data?.queued ?? 0}건) — 도달은 발송 원장에서 확인해요`);
+    else onMsg(false, j.error || `실패 (${r.status})`);
+  } catch (e) {
+    onMsg(false, '요청 실패 — ' + e.message);
+  } finally {
+    sending = false; btn.disabled = false; btn.textContent = label;
+  }
+};
+MF.isSending = () => sending;
+
+/* ── 롤백(작업 이력) ────────────────────────────────────────────────── */
+/* ⚠️ 지금은 winsa_readonly 라 쓰기가 아예 안 나간다 → 이력이 비어 있는 게 정상이다.
+      비었다고 실패로 보이게 하지 않는다. */
+MF.openRollback = async function () {
+  const m = $('modal');
+  m.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+    <div class="sheet" style="background:var(--card);max-width:920px">
+    <div class="mh"><b>작업 이력 · 롤백</b>
+      <span style="color:var(--dim);font-size:13px">모닝 앱이 덴트웹에 쓴 기록</span>
+      <span class="sp"></span><button class="x" id="mx" aria-label="닫기">✕</button></div>
+    <div class="mb" id="rbb" style="background:var(--card)">
+      <div class="noitem">불러오는 중…</div></div>
+  </div></div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('mx').onclick = close;
+  m.querySelector('.modal').onclick = e => { if (e.target === e.currentTarget) close(); };
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); }
+  });
+  try {
+    const j = await (await fetch(API('/api/app/audit'))).json();
+    if (!j.ok) throw new Error(j.error || '조회 실패');
+    const items = j.data.items || [];
+    if (!items.length) {
+      $('rbb').innerHTML = `<div class="noitem">아직 되돌릴 작업이 없어요.<br>
+        <span style="font-size:12.5px;color:var(--dim)">
+        지금 덴트웹 접속 계정은 조회 전용(winsa_readonly)이라 쓰기가 나가지 않습니다 —
+        쓰기 권한(winsa_writer)이 열리면 이곳에 작업이 초 단위로 쌓입니다.</span></div>`;
+      return;
+    }
+    $('rbb').innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr>${['시각 (KST)', '작업', '대상', '환자', '내용', '상태'].map(h =>
+        `<th style="text-align:left;font-size:11.5px;color:var(--dim);font-weight:600;
+          padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap">${h}</th>`).join('')}
+      </tr></thead><tbody>${items.map(it => `<tr>
+        <td style="padding:9px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap">${esc(MF.kstFull(it.at))}</td>
+        <td style="padding:9px;border-bottom:1px solid var(--line)">${esc(it.op)}</td>
+        <td style="padding:9px;border-bottom:1px solid var(--line)">${esc(it.tableName || '')}</td>
+        <td style="padding:9px;border-bottom:1px solid var(--line)">${esc(it.patientName || '')}</td>
+        <td style="padding:9px;border-bottom:1px solid var(--line)">${esc(it.summary || '')}</td>
+        <td style="padding:9px;border-bottom:1px solid var(--line)">${esc(it.status)}</td>
+      </tr>`).join('')}</tbody></table>`;
+  } catch (e) {
+    $('rbb').innerHTML = `<div class="err">작업 이력을 불러오지 못했어요 — ${esc(e.message)}</div>`;
+  }
+};
+
+/* ── 화면이 공통으로 쓰는 「환자 한 명 요약」 ───────────────────────── */
+/* 여러 버전이 호버 카드·말풍선·행 펼침에서 같은 요약을 쓴다. 한 곳에서 만든다. */
+MF.summary = function (r, s) {
+  const ck = s.ckBy.get(String(r.patientId));
+  const wm = MF.waitedMin(r), tm = MF.treatMin(r);
+  const age = MF.ageOf(r), dr = MF.doctorOf(r);
+  return {
+    name: r.name, chart: r.chartNumber, pid: String(r.patientId),
+    stage: MF.stageOf(r), chair: MF.chairName(r.chairId),
+    time: MF.timeOf(r), waited: wm, treated: tm,
+    isNew: !!r.isNewPatient, age, sex: r.gender === 'F' ? '여' : r.gender === 'M' ? '남' : '',
+    doctor: dr, memo: r.treatmentDetail || r.note || '',
+    intake: ck ? (ck.status === 'delivered' ? '전달' : '완료') : null,
+    needsIntake: MF.needsIntake(r, ck),
+    notice: s.noticeBy.has(String(r.patientId)),
+    canSend: MF.needsIntake(r, ck) && r.status <= 1 && (r.mobile || '').trim(),
+    urgent: r.status <= 1 && wm !== null && wm >= 20,
+    raw: r,
+  };
+};
+
+})(window);
+
+</script>
+<script>
+const page = MF.shell({ version: 'v2' });
+
+// 롤백 버튼은 **공용 껍데기**가 모든 화면 헤더에 단다(app_shared.js) —
+//   작업 이력은 페이지에 묶이지 않는 전역 원장이라 어느 화면에서든 같은 목록이다.
+
+// 🔴 완료는 **기본 접는다.** 실측(2026-10-06): 완료 91 장이 세로 10,911px 였다.
+//    하루가 끝날수록 전부 완료로 몰리는 데이터라, 안 접으면 시간이 갈수록
+//    화면이 못 쓰게 된다. 접은 상태에서도 개수는 칼럼 제목에 그대로 보인다.
+const FOLD = 10;
+let openCols = {};        // 칼럼별 '전체 보기' 여부
+let filter = null;        // 요약 박스를 눌러 거른 상태 ('noIntake' | null)
+let UPCOMING = [];        // 「내원 전」 — 오늘 예약했는데 아직 접수 안 된 사람
+
+/* 요약 박스용 수치 — 접수 흐름 **밖**에서 생긴 할 일.
+   ⚠️ 실패해도 화면을 죽이지 않는다. 다만 **0 으로 덮지도 않는다** — 못 받은 것과
+      「한 건도 없다」는 다르다. 실패하면 직전 값을 그대로 둔다.
+   🔴 `cc` 는 **못 받으면 null** 이다. 0 으로 두면 「오늘 한 건도 없다」는 사실
+      주장이 되는데, 못 센 것과 전혀 다르다 — 화면은 null 을 `?` 로 그린다. */
+const KPI = { reqChange: 0, missed: 0, cc: null };
+
+/** 「지각」 — 예약 시각이 지났는데 **아직 접수가 없는** 사람.
+ *
+ * 🔴 `UPCOMING` 을 그대로 센다. 그 목록은 이미 **접수한 사람을 뺀** 뒤이므로
+ *    (loadUpcoming 참고) 여기서 또 거르지 않는다. 실측 2026-10-07: 지각 7명
+ *    전원이 접수 레코드 없음 — 접수자 제외는 정상 동작한다.
+ * ⚠️ 보고 있는 30분 슬롯과 **무관하게** 오늘 전체를 센다. 데스크가 09시 칸을
+ *    보고 있어도 「지금 몇 명이 안 왔나」는 그대로 알아야 한다.
+ */
+function lateList() {
+  const now = new Date();
+  const nowKey = String(now.getHours()).padStart(2, '0')
+               + String(now.getMinutes()).padStart(2, '0');
+  return UPCOMING.filter(a => {
+    const h = String(a.scheduledAt || '').slice(8, 12);
+    return h.length === 4 && h < nowKey;
+  });
+}
+
+/** 예약변경 요청 · 부재중 전화를 센다.
+ *
+ * 🔴 두 API 는 **봉투 모양이 다르다**(실측):
+ *    - `/api/reach-action`   → `{ok:true, items:[...]}`  (data 아님)
+ *    - `/api/lgu-today-calls`→ `[...]`                    (봉투 자체가 없음)
+ *    한쪽 모양으로 통일해 읽으면 조용히 0 이 된다.
+ * 🔴 부재중은 `direction === 'missed'` 만 센다. 같은 조회에 `inbound`(받은 전화)가
+ *    섞여 오므로, 거르지 않으면 「부재중」이 전체 수신 건수가 된다.
+ */
+async function loadKpi() {
+  try {
+    const j = await (await fetch(API('/api/reach-action'))).json();
+    if (j && j.ok) {
+      // 예약 변경 요청 — 미처리만 센다(처리한 건 할 일이 아니다).
+      KPI.reqChange = (j.items || []).filter(x =>
+        String(x.actionType || '') === 'visit_reschedule'
+        && !x.resolvedAt && !x.resolved_at).length;
+    }
+  } catch (_) { /* 직전 값 유지 */ }
+  try {
+    const arr = await (await fetch(API('/api/lgu-today-calls'))).json();
+    if (Array.isArray(arr)) {
+      KPI.missed = arr.filter(x => String(x.direction || '') === 'missed').length;
+    }
+  } catch (_) { /* 직전 값 유지 */ }
+  try {
+    // 오늘 취소·변경 — 일일보고서와 **같은 규칙**(데스크가 옮긴 컬럼 기준)으로
+    //   서버가 센다. 화면은 받아 적기만 한다.
+    const j = await (await fetch(API('/api/dw/cancel-change'))).json();
+    if (j && j.ok && j.data) KPI.cc = j.data.total;
+  } catch (_) { /* null 유지 → 화면에 `?` */ }
+}
+
+/* 「내원 전」이 지금 보고 있는 **30분 슬롯**(분 단위, 자정 기준).
+   null 이면 "현재 시각에 맞춘다" — 처음 열 때와 10초 폴링마다 현재로 따라간다.
+   화살표로 옮기면 그 자리에 **머문다**(폴링이 멋대로 되돌리면 읽던 자리를 잃는다). */
+let slotMin = null;
+const SLOT = 30;
+
+/** 지금 시각을 30분 격자로 내린 값(분). 09:47 → 09:30. */
+function nowSlot() {
+  const d = new Date();
+  return Math.floor((d.getHours() * 60 + d.getMinutes()) / SLOT) * SLOT;
+}
+/** 'HHMM' → 분. 못 읽으면 null. */
+function hhmmMin(s) {
+  const t = String(s || '');
+  if (t.length < 4) return null;
+  const h = +t.slice(0, 2), m = +t.slice(2, 4);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+}
+/** 예약 레코드의 예약 시각(분). */
+function apptMin(a) { return hhmmMin(String(a.scheduledAt || '').slice(8, 12)); }
+/** 분 → '09:30'. */
+function fmtMin(m) {
+  const x = ((m % 1440) + 1440) % 1440;
+  return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0');
+}
+
+/* 단계 칸 — `to` 는 드래그로 떨궜을 때 덴트웹에 쓸 `n상태` 값이다.
+   🔴 「내원 전」은 **접수 전**이라 덴트웹에 행이 없다 → `to:null`(옮길 수 없다). */
+const COLS = [
+  { key: 'before', t: '내원 전', to: null, color: '#8b95a1' },
+  ...MF.STAGES.map(st => ({ key: st.key, t: st.t, color: st.color,
+    to: { wait: 0, in: 2, pay: 3, done: 4 }[st.key] })),
+];
+
+/** 「내원 전」 — 오늘 예약이 있는데 **아직 접수가 없는** 사람.
+ *
+ * 참고: temp-v1-dental 알림톡 화면 「오늘(큐) → 방문예정」 칸. 거기선 304
+ *   (예약 1시간 전 안내) 카드를 담는데, 그 카드가 만들어지는 조건이
+ *   **오늘 예약 + 미방문**이다. 같은 조건을 쓴다.
+ *
+ * 🔴 **접수된 사람은 뺀다.** 접수되면 그 사람은 이미 「접수·대기」 칸에 있다 —
+ *    양쪽에 다 보이면 같은 환자를 두 번 센다.
+ * 🔴 `/api/dw/appointments` 는 **같은 환자를 여러 줄로 준다**(담당자 staffId 가
+ *    다르면 행이 갈린다 — 실측: 김호준 8996 이 staffId 1·122 로 2줄).
+ *    환자ID로 접지 않으면 「내원 전 3명」이 실제로는 1명이다.
+ * ⚠️ 지난 시각 예약도 **남겨 둔다**. 10시 예약인데 11시에 안 왔으면 그게 바로
+ *    데스크가 전화할 사람이다 — 시간이 지났다고 지우면 노쇼가 조용히 사라진다.
+ */
+async function loadUpcoming(rows) {
+  // 🔴 `care_only=1` — **사람이 오는 예약만** 받는다. 덴트웹 예약창에는
+  //    「리콜관리」·「예약취소」·「당일변경」 같은 **업무 표시 컬럼**이 섞여 있는데,
+  //    그대로 「내원 전」에 넣으면 오지도 않을 사람에게 안내를 보내려 든다.
+  //    판정은 서버가 한다(최근 30일 「예약 있는데 접수 없음」 비율 60% 이상).
+  const j = await (await fetch(API('/api/dw/appointments?care_only=1'))).json();
+  if (!j.ok) return [];
+  const arrived = new Set((rows || []).map(r => String(r.patientId)));
+  const by = new Map();
+  for (const a of (j.data || [])) {
+    const pid = String(a.patientId ?? '');
+    if (!pid || arrived.has(pid)) continue;
+    if (Number(a.status) === 2) continue;          // 취소는 올 사람이 아니다
+    const prev = by.get(pid);
+    if (!prev || String(a.scheduledAt || '') < String(prev.scheduledAt || '')) by.set(pid, a);
+  }
+  return [...by.values()].sort((x, y) =>
+    String(x.scheduledAt || '').localeCompare(String(y.scheduledAt || '')));
+}
+
+/** 「내원 전」 카드 — 접수 전이라 드래그 대상이 아니다. */
+function beforeCard(a) {
+  const hhmm = String(a.scheduledAt || '').slice(8, 12);
+  const t = hhmm.length === 4 ? hhmm.slice(0, 2) + ':' + hhmm.slice(2) : '';
+  const now = new Date();
+  const nowKey = String(now.getHours()).padStart(2, '0')
+               + String(now.getMinutes()).padStart(2, '0');
+  const late = hhmm.length === 4 && hhmm < nowKey;
+  const tags = [a.isNewPatient ? '<span class="tag new">신환</span>'
+                               : '<span class="tag">재진</span>'];
+  if (late) tags.push('<span class="tag no">지각 · 예약 시각 지남</span>');
+  return `<div class="pt before ${late ? 'urg' : ''}">
+    <div class="r1"><span class="nm">${MF.esc(a.name || '')}</span>
+      ${a.chartNumber ? `<span class="ch">#${MF.esc(a.chartNumber)}</span>` : ''}</div>
+    <div class="r2">${t ? `<span class="tm">${MF.esc(t)} 예약</span>` : ''}</div>
+    ${a.note ? `<div class="memo">${MF.esc(a.note)}</div>` : ''}
+    <div class="tags">${tags.join('')}</div>
+    <div class="acts">
+      <button data-hist="${MF.esc(a.patientId)}"
+        data-hname="${MF.esc(a.name || '')}">🕘 히스토리</button>
+      ${late ? `<button class="pri" data-late="${MF.esc(a.patientId)}"
+        data-lname="${MF.esc(a.name || '')}">지각 안내</button>` : ''}
+    </div>
+    ${late ? `<div class="sendmsg" id="lm-${MF.esc(a.patientId)}"></div>` : ''}
+  </div>`;
+}
+
+/** 「내원 전」 칸 본문 — 위/아래 화살표 + 지금 슬롯의 예약자.
+ *
+ * 🔴 **화살표는 예약이 있는 슬롯으로 건너뛴다.** 30분씩 기계적으로 옮기면
+ *    점심시간처럼 빈 구간에서 여러 번 눌러야 한다 — 누르는 사람이 손해다.
+ *    다음/이전에 사람이 있는 슬롯을 찾아 한 번에 간다.
+ * ⚠️ 끝에 닿으면 버튼을 **지우지 않고 비활성**으로 둔다. 버튼이 사라지면 자리가
+ *    밀려 아래 카드가 들썩인다.
+ */
+function beforeBody(cur, inSlot) {
+  // 예약이 있는 슬롯만 모아 둔다(정렬된 고유 목록).
+  const slots = [...new Set(UPCOMING.map(apptMin).filter(m => m !== null)
+    .map(m => Math.floor(m / SLOT) * SLOT))].sort((a, b) => a - b);
+  const prev = slots.filter(x => x < cur).pop();
+  const next = slots.find(x => x > cur);
+  const nBefore = UPCOMING.filter(a => { const m = apptMin(a); return m !== null && m < cur; }).length;
+  const nAfter = UPCOMING.filter(a => { const m = apptMin(a); return m !== null && m >= cur + SLOT; }).length;
+
+  const up = `<button class="slotnav" data-slot="${prev === undefined ? '' : prev}"
+    ${prev === undefined ? 'disabled' : ''}
+    title="${prev === undefined ? '앞 시간에 예약이 없어요' : fmtMin(prev) + ' 보기'}">
+    <span class="ar">▲</span>
+    <span class="lb">${prev === undefined ? '앞 시간 없음' : `${fmtMin(prev)} · ${nBefore}명`}</span>
+  </button>`;
+  const down = `<button class="slotnav" data-slot="${next === undefined ? '' : next}"
+    ${next === undefined ? 'disabled' : ''}
+    title="${next === undefined ? '뒤 시간에 예약이 없어요' : fmtMin(next) + ' 보기'}">
+    <span class="lb">${next === undefined ? '뒤 시간 없음' : `${fmtMin(next)} · ${nAfter}명`}</span>
+    <span class="ar">▼</span>
+  </button>`;
+
+  const isNow = cur === nowSlot();
+  const head = `<div class="slothead">
+    <b>${fmtMin(cur)}–${fmtMin(cur + SLOT)}</b>
+    ${isNow ? '<span class="nowtag">지금</span>'
+            : '<button class="backnow" data-slot="now">지금으로</button>'}
+    <span class="allc">전체 ${UPCOMING.length}명</span>
+  </div>`;
+
+  const cards = inSlot.length
+    ? inSlot.map(beforeCard).join('')
+    : `<div class="empty">이 시간대에는 예약이 없어요</div>`;
+
+  return head + up + `<div class="slotbody">${cards}</div>` + down;
+}
+
+/** 「지각」 필터일 때의 「내원 전」 칸 — 시간대를 무시하고 안 온 사람을 모은다.
+ *
+ * 🔴 전화를 돌리는 자리다. 예약이 **이른 사람부터** 세운다 — 가장 오래 기다리게
+ *    한 사람이 먼저다.
+ */
+function lateBody(late) {
+  if (!late.length) return '<div class="empty">예약 시각이 지난 분이 없어요</div>';
+  const sorted = late.slice().sort((a, b) =>
+    String(a.scheduledAt || '').localeCompare(String(b.scheduledAt || '')));
+  return `<div class="slothead"><b>안 오신 분</b>
+      <span class="latetag">${sorted.length}명</span>
+      <span class="allc">예약 이른 순</span></div>`
+    + sorted.map(beforeCard).join('');
+}
+
+/** 지각 안내 알림톡 — **한 명씩** 보낸다.
+ *
+ * 🔴 **일괄 발송 버튼은 두지 않는다.** 지각은 사정이 제각각이다(차가 막힘·오해·
+ *    노쇼). 한 번에 다 보내면 이미 오는 중인 사람에게도 독촉이 가고, 되돌릴 수
+ *    없다. 데스크가 한 명씩 보고 누르게 한다.
+ *
+ * ⚠️ **전용 템플릿이 아직 없다.** 발송 게이트의 purpose 중 「지각 안내」가 없어
+ *    뜻이 가장 가까운 `reach_action`(요청·안내, SSDC_L1_v1)으로 나간다.
+ *    전용 템플릿이 승인되면 이 값만 바꾼다 — 화면은 그대로 둔다.
+ *    🔴 어떤 이름으로 나가는지 **확인창에 그대로 적는다**. 데스크가 모르고 보내면
+ *       환자가 받은 문구와 우리가 생각한 문구가 달라진다.
+ */
+async function sendLate(pid, name, btn) {
+  if (!confirm(`${name} 님에게 지각 안내를 보냅니다.\n\n`
+    + `· 전용 「지각 안내」 템플릿이 아직 없어 요청·안내(SSDC_L1_v1)로 나갑니다.\n`
+    + `· 보낸 뒤에는 취소할 수 없습니다.\n\n진행할까요?`)) return;
+  const el = MF.$('lm-' + pid);
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '보내는 중…';
+  try {
+    const r = await fetch(API('/api/send/alimtalk'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ purpose: 'reach_action', items: [{ patientRef: pid, toPhone: '' }] }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok !== false) {
+      // 🔴 「보냈다」가 아니라 **「큐에 넣었다」**로 말한다. 도달은 발송 원장이 판정한다.
+      if (el) { el.className = 'sendmsg ok';
+        el.textContent = `큐에 넣었어요 (${(j.data && j.data.queued) || 0}건) — 도달은 발송 원장에서 확인해요`; }
+    } else {
+      if (el) { el.className = 'sendmsg no'; el.textContent = j.error || `실패 (${r.status})`; }
+    }
+  } catch (e) {
+    if (el) { el.className = 'sendmsg no'; el.textContent = '요청 실패 — ' + e.message; }
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+function render(s) {
+  const c = MF.counts(s);
+  MF.$('navCnt').textContent = c.wait + c.in;
+
+  const kpi = (key, n, label, cls) => `<button class="kpi ${cls || ''}
+      ${filter === key ? 'sel' : ''}" data-f="${key || ''}">
+    <div class="n">${n}</div><div class="l">${label}</div></button>`;
+
+  /* 요약 박스 — **아래 칸 수와 겹치지 않는 것만** 둔다(2026-10-06 사용자 지시).
+   *
+   * 🔴 예전에는 접수·대기/진료 중/수납 대기/완료를 여기 또 적었다. 바로 아래
+   *    칼럼 제목에 같은 수가 있어 **같은 값을 두 번** 보여주는 꼴이었다.
+   *    이 자리는 「칸을 봐서는 모르는 것」을 말해야 한다 — 전화·요청·취소처럼
+   *    접수 흐름 **밖**에서 생긴 할 일.
+   *
+   * ⚠️ 「오늘 취소변경」·「오늘 컴플레인」은 **아직 수치를 낼 수 없다.**
+   *    - 취소/변경 집계는 덴트웹 `daily_report`(당일취소·예약취소·당일변경·
+   *      예약변경 컬럼)에 있지만 **HTTP 로 안 열려 있다**(Tauri 명령 전용).
+   *    - 컴플레인은 모으는 자리가 아직 없다.
+   *    그래서 **`?` 로 둔다**(사용자 지시). 🔴 0 으로 적지 않는다 — 0 은
+   *    「오늘 한 건도 없다」는 **사실 주장**이라, 못 세는 것과 전혀 다르다.
+   */
+  /* 🔴 **거를 수 있는 것만 누르게 한다.** 「예약변경 요청」·「부재중 전화」는
+   *    접수 카드가 아니라 요청 큐·통화 기록이라, 아래 칸에서 걸러낼 대상이
+   *    아니다. 눌러도 아무 일이 없으면 「고장났다」로 읽힌다 —
+   *    누를 수 있는 건 「문진 없음」뿐이다. */
+  const q = '<span class="unk" title="아직 집계할 수 없는 값이에요">?</span>';
+  const late = lateList();
+  // 🔴 못 받았으면(null) `?` — 0 으로 적으면 「한 건도 없다」는 거짓 주장이 된다.
+  const ccVal = (KPI.cc === null || KPI.cc === undefined) ? q : KPI.cc;
+  let h = `<div class="kpis">
+    ${kpi('', ccVal, '오늘 취소변경', KPI.cc ? 'warn' : 'calm')}
+    ${kpi('', q, '오늘 컴플레인')}
+    ${kpi('', KPI.reqChange, '예약변경 요청', KPI.reqChange ? 'warn' : 'calm')}
+    ${kpi('', KPI.missed, '부재중 전화', KPI.missed ? 'warn' : 'calm')}
+    ${kpi('noIntake', c.noIntake, '문진 없음', c.noIntake ? 'warn' : 'calm')}
+    ${kpi('late', late.length, '지각 (예약 시각 지남)', late.length ? 'warn' : 'calm')}
+  </div>`;
+  if (filter === 'noIntake') h += `<div class="sub" style="margin:-4px 0 10px">
+    <b style="color:var(--blue-d)">문진이 없는 환자만</b> 보고 있어요 —
+    같은 박스를 다시 누르면 전체로 돌아갑니다.</div>`;
+  if (filter === 'late') h += `<div class="sub" style="margin:-4px 0 10px">
+    <b style="color:var(--red-d)">예약 시각이 지났는데 아직 안 오신 분</b>만 「내원 전」 칸에
+    모아 보고 있어요 — 같은 박스를 다시 누르면 시간대별 보기로 돌아갑니다.</div>`;
+
+  h += '<div class="cols">';
+  for (const col of COLS) {
+    const st = MF.STAGES.find(x => x.key === col.key);   // 「내원 전」은 없다
+    let list = st ? s.rows.filter(st.has) : [];
+    if (st && filter === 'noIntake') list = list.filter(r => MF.needsIntake(r, s.ckBy.get(String(r.patientId))));
+
+    let body, count = list.length;
+    if (col.key === 'before') {
+      // 🔴 「지각」을 누르면 **시간대를 무시하고** 지각자만 모아 보여준다.
+      //    전화를 돌릴 때는 「09시 칸·10시 칸」이 아니라 「안 온 사람 전부」가 필요하다.
+      if (filter === 'late') {
+        count = late.length;
+        body = lateBody(late);
+      } else {
+        // 평소에는 **지금 보는 30분 슬롯**만 센다.
+        const cur = (slotMin === null) ? nowSlot() : slotMin;
+        const inSlot = UPCOMING.filter(a => {
+          const m = apptMin(a);
+          return m !== null && m >= cur && m < cur + SLOT;
+        });
+        count = inSlot.length;
+        body = beforeBody(cur, inSlot);
+      }
+    } else if (col.key === 'in' && MF.CHAIRS.length) {
+      body = chairBody(list, s);
+    } else {
+      // 접수·대기는 **오래 기다린 순**으로 올린다 — 늦게 온 사람이 위에 있으면
+      // 가장 급한 사람을 찾으러 매번 끝까지 내려가야 한다.
+      if (col.key === 'wait') list = list.slice().sort((a, b) =>
+        String(a.receivedAt || '').localeCompare(String(b.receivedAt || '')));
+      // 완료는 **최근 끝난 순** — 방금 끝난 사람이 궁금하지 아침 첫 환자가 아니다.
+      if (col.key === 'done') list = list.slice().sort((a, b) =>
+        String(b.treatEndAt || b.receivedAt || '').localeCompare(String(a.treatEndAt || a.receivedAt || '')));
+
+      const folded = (col.key === 'done' || list.length > 24) && !openCols[col.key];
+      const shown = folded ? list.slice(0, FOLD) : list;
+      body = shown.length ? shown.map(r => card(r, s)).join('') : '<div class="empty">없음</div>';
+      if (folded && list.length > FOLD)
+        body += `<div class="foldmsg">아래로 ${list.length - FOLD}명 더 있어요</div>`;
+    }
+
+    const canFold = col.key === 'done' || list.length > 24;
+    // 🔴 `.drop` 으로 감싼다 — 드롭 대상이 **칸 전체**여야 빈 칸에도 떨굴 수 있다.
+    h += `<div class="col" data-col="${col.key}" data-title="${MF.esc(col.t)}">
+      <div class="colhead">
+        <span class="dotmark" style="background:${col.color}"></span>
+        <span class="t">${MF.esc(col.t)}</span><span class="c">${count}</span>
+        ${canFold && list.length > FOLD ? `<button class="more" data-more="${col.key}">${
+          openCols[col.key] ? '접기' : `전체 ${list.length}명`}</button>` : ''}
+      </div><div class="drop">${body}</div></div>`;
+  }
+  page.innerHTML = h + '</div>';
+
+  page.querySelectorAll('[data-f]').forEach(b => {
+    b.onclick = () => { const k = b.dataset.f; if (!k) return;
+      filter = (filter === k) ? null : k; render(s); };
+  });
+  page.querySelectorAll('[data-more]').forEach(b => {
+    b.onclick = () => { const k = b.dataset.more; openCols[k] = !openCols[k]; render(s); };
+  });
+  // 「내원 전」 시간대 이동 — 화살표/「지금으로」.
+  //   🔴 옮긴 뒤에는 그 자리에 **머문다**. 폴링이 현재 시각으로 되돌리면
+  //      앞 시간을 확인하던 데스크가 매번 자리를 잃는다.
+  page.querySelectorAll('[data-slot]').forEach(b => {
+    b.onclick = () => {
+      const v = b.dataset.slot;
+      slotMin = (v === 'now') ? null : Number(v);
+      render(s);
+    };
+  });
+  page.querySelectorAll('[data-hist]').forEach(b => {
+    b.onclick = () => MF.openHistory(b.dataset.hist, b.dataset.hname);
+  });
+  page.querySelectorAll('[data-late]').forEach(b => {
+    b.onclick = () => sendLate(b.dataset.late, b.dataset.lname, b);
+  });
+  page.querySelectorAll('[data-send]').forEach(b => {
+    b.onclick = () => MF.sendIntake(b.dataset.send, b.dataset.sname, b, (ok, msg) => {
+      const el = MF.$('sm-' + b.dataset.send);
+      if (el) { el.className = 'sendmsg ' + (ok ? 'ok' : 'no'); el.textContent = msg; }
+    });
+  });
+  bindDrag();
+}
+
+/* ── 드래그로 단계 옮기기 ──────────────────────────────────────────────
+ *
+ * 🔴 **낙관적으로 먼저 옮기지 않는다.** 서버가 덴트웹에 쓴 것을 확인한 뒤
+ *    다시 불러 그린다. 화면만 옮겨 두면 실패했을 때 화면과 DB 가 갈리고,
+ *    데스크는 「옮겼다」고 믿은 채 다음 일을 한다.
+ */
+let dragPid = null;
+function bindDrag() {
+  page.querySelectorAll('.pt[draggable]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragPid = el.dataset.pid;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // Firefox 는 데이터가 없으면 드래그를 시작하지 않는다.
+      e.dataTransfer.setData('text/plain', dragPid);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging'); dragPid = null;
+      page.querySelectorAll('.col.over, .chair.over').forEach(c => c.classList.remove('over'));
+    });
+  });
+  // 🔴 체어 슬롯이 칸보다 **먼저** 받는다. 이벤트는 자식 → 부모로 올라가므로
+  //    체어에서 stopPropagation 하지 않으면 칸 핸들러가 「체어 없는 진료 중」으로
+  //    다시 처리해 버린다.
+  page.querySelectorAll('.chair[data-chair]').forEach(ch => {
+    ch.addEventListener('dragover', e => {
+      if (!dragPid) return;
+      e.preventDefault(); e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      ch.classList.add('over');
+    });
+    ch.addEventListener('dragleave', () => ch.classList.remove('over'));
+    ch.addEventListener('drop', e => {
+      e.preventDefault(); e.stopPropagation();
+      ch.classList.remove('over');
+      if (!dragPid) return;
+      const card = page.querySelector(`.pt[data-pid="${CSS.escape(dragPid)}"]`);
+      const col = ch.closest('.col[data-col]');
+      moveStage(card, col, card ? card.dataset.name : '', Number(ch.dataset.chair));
+    });
+  });
+  page.querySelectorAll('.col[data-col]').forEach(col => {
+    col.addEventListener('dragover', e => {
+      if (!dragPid) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      col.classList.add('over');
+    });
+    col.addEventListener('dragleave', () => col.classList.remove('over'));
+    col.addEventListener('drop', e => {
+      e.preventDefault();
+      col.classList.remove('over');
+      if (!dragPid) return;
+      const card = page.querySelector(`.pt[data-pid="${CSS.escape(dragPid)}"]`);
+      moveStage(card, col, card ? card.dataset.name : '');
+    });
+  });
+}
+
+/** 단계 이동 — 덴트웹 TB_접수목록 의 `n상태` 를 바꾼다(쓰기 계정 winsa_writer). */
+async function moveStage(card, col, name, chairId) {
+  if (!card) return;
+  const spec = COLS.find(c => c.key === col.dataset.col);
+  if (!spec || spec.to === null) {
+    // 「내원 전」은 접수 전이라 덴트웹에 행이 없다 — 옮길 대상이 아니다.
+    MF.toast('옮길 수 없어요', `「${col.dataset.title}」(으)로는 바꿀 수 없습니다`, 1800);
+    return;
+  }
+  // 🔴 「진료 중」은 **체어 위에** 놓아야 한다(사용자 결정 2026-10-07).
+  //    칸 여백에 떨어뜨린 경우가 여기다 — 받아 주면 체어 없는 진료 중이 생기는데,
+  //    덴트웹 실측상 진료 중은 체어가 차 있는 게 정상이라 운영과 어긋난다.
+  if (spec.to === 2 && !(chairId > 0)) {
+    MF.toast('체어를 골라 주세요', '진료 중은 체어 위에 놓아야 합니다', 2200);
+    reload();   // 끌어 둔 카드를 제자리로.
+    return;
+  }
+  const cur = Number(card.dataset.status);
+  // 이미 그 칸이면 없던 변경을 만들지 않는다(대기는 0·1 둘 다 같은 칸).
+  // ⚠️ 단, 진료 중 안에서 **체어만 바꾸는 것**은 변경이다(2번 → 4번).
+  const sameChair = !(chairId > 0) || Number(card.dataset.chair || 0) === chairId;
+  if ((cur === spec.to && sameChair) || (spec.to === 0 && (cur === 0 || cur === 1))) return;
+  const rat = card.dataset.rat;
+  if (!rat) {
+    MF.toast('옮길 수 없어요', '접수 시각을 알 수 없어 행을 특정할 수 없습니다', 2200);
+    return;
+  }
+  try {
+    const r = await fetch(API('/api/app/reception/stage'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ receivedAt: rat, patientId: Number(card.dataset.pid),
+                             patientName: name, status: spec.to,
+                             chairId: chairId > 0 ? chairId : undefined }),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      // 🔴 실패를 성공처럼 보이게 하지 않는다 — 화면만 옮겨지면 덴트웹과 어긋난다.
+      // 체어가 겹치면 장애가 아니라 **고치면 되는 일**이다 — 그렇게 말해 준다.
+      MF.toast(j.code === 'NO_WRITE_PERMISSION' ? '권한이 없습니다'
+             : j.code === 'CONFLICT' ? '그 체어는 사용 중이에요' : '옮기지 못했어요',
+               j.error || '', 2800);
+      reload();           // 서버가 진실이다 — 원래 자리로 되돌린다.
+      return;
+    }
+    const chName = chairId > 0
+      ? (page.querySelector(`.chair[data-chair="${chairId}"]`)?.dataset.chname || '')
+      : '';
+    MF.toast(chName ? `${name} 님을 ${chName} 체어로 옮겼어요`
+                    : `${name} 님을 「${col.dataset.title}」(으)로 옮겼어요`, '', 1400);
+    reload();
+  } catch (e) {
+    MF.toast('옮기지 못했어요', e.message, 2200);
+    reload();
+  }
+}
+
+/* 「진료 중」 — 체어를 **전부 깔고** 그 위에 환자를 얹는다.
+   🔴 빈 체어는 **점선 박스**로 그대로 보여준다(2026-10-06 사용자 지시).
+      「어디가 비었나」는 데스크가 다음 환자를 부를 때 가장 먼저 묻는 것이라,
+      한 줄로 접으면 체어 배치와 눈이 맞지 않는다. 점선이라 찬 체어(실선)와
+      모양만으로 구분된다 — 색에 기대지 않는다.
+   🔴 **빈 체어를 맨 위에 모아 둔다**(2026-10-06 사용자 지시). 체어 순서대로
+      섞어 두면 「다음 분 어디로 모실까」에 답하려고 긴 칸을 눈으로 훑어야 한다.
+      빈 자리가 먼저 눈에 들어와야 바로 부를 수 있다.
+   ⚠️ 엑스레이실은 진료 체어가 아니다 — 아래에 따로 묶어 비중을 낮춘다. */
+function chairBody(list, s) {
+  const by = new Map();
+  for (const r of list) {
+    const k = String(r.chairId ?? '');
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(r);
+  }
+  // 빈 체어(free)와 쓰는 체어(busy)를 따로 모은다 — 빈 것이 **위로** 간다.
+  let free = '', busy = '', freeRooms = [], freeN = 0;
+  for (const ch of MF.CHAIRS) {
+    const seated = by.get(String(ch.chairId)) || [];
+    by.delete(String(ch.chairId));
+    if (!seated.length && MF.isRoom(ch)) { freeRooms.push(ch.name); continue; }
+    if (!seated.length) {
+      freeN++;
+      free += `<div class="chair free" data-chair="${ch.chairId}" data-chname="${MF.esc(ch.name)}">
+        <div class="chlab"><span>${MF.esc(ch.name)}</span>
+        <span class="freetag">비어 있음</span></div></div>`;
+      continue;
+    }
+    busy += `<div class="chair" data-chair="${ch.chairId}" data-chname="${MF.esc(ch.name)}">
+      <div class="chlab"><span>${MF.esc(ch.name)}</span>
+      <span class="meter">${seated.map(r => MF.dur(MF.treatMin(r)) || '').filter(Boolean).join(' · ')}</span>
+    </div>${seated.map(r => card(r, s)).join('')}</div>`;
+  }
+  // 빈 체어가 여럿이면 몇 자리인지 한 줄로 먼저 말해 준다 — 세지 않아도 되게.
+  let h = freeN ? `<div class="freehead">지금 비어 있는 체어 <b>${freeN}</b>자리</div>` + free : '';
+  h += busy;
+  // ⚠️ 체어 목록에 없는 chairId 로 진료 중인 환자가 있을 수 있다(체어 삭제·신설).
+  //    조용히 숨기면 진료 중인 사람이 화면에서 사라진다 — 따로 모아 보여준다.
+  const orphan = [...by.values()].flat();
+  if (orphan.length) h += `<div class="chair"><div class="chlab"><span>체어 미지정</span></div>
+    ${orphan.map(r => card(r, s)).join('')}</div>`;
+  if (!h) h = '<div class="empty">진료 중인 환자가 없어요</div>';
+  // 촬영실은 진료 체어와 섞지 않는다 — 한 줄로만 적는다.
+  if (freeRooms.length) h += `<div class="freebar">
+    <span class="rm">촬영실 ${MF.esc(freeRooms.join(', '))}</span></div>`;
+  return h;
+}
+
+function card(r, s) {
+  const v = MF.summary(r, s);
+  const tags = [];
+  tags.push(v.isNew ? '<span class="tag new">신환</span>' : '<span class="tag">재진</span>');
+  // 🔴 문진은 **진료 전 환자에게만** 말한다. 끝난 사람에게 「문진 없음」은 소음이다.
+  if (v.intake) tags.push(`<span class="tag ok">문진 ${v.intake}</span>`);
+  else if (v.needsIntake) tags.push('<span class="tag no">문진 없음</span>');
+  if (v.notice) tags.push('<span class="tag">알림톡 보냄</span>');
+  if (v.urgent) tags.push(`<span class="tag wait">${v.waited}분 대기</span>`);
+
+  // 둘째 줄 — 시각·체어·담당의. 첫 줄에서 밀어낸 것들이 여기 모인다.
+  const meta = [];
+  if (v.time) meta.push(`<span class="tm">${MF.esc(v.time)}</span>`);
+  // 🔴 체어는 **이름**이다. chairId 를 찍으면 없는 방 번호가 된다(app_shared.js 주석).
+  if (v.chair) meta.push(MF.esc(v.chair));
+  if (v.doctor) meta.push(MF.esc('dr.' + v.doctor));
+  if (v.stage === 'in' && v.treated !== null) meta.push(MF.dur(v.treated) + ' 경과');
+  if (v.stage === 'done' && v.treated !== null) meta.push('진료 ' + MF.dur(v.treated));
+
+  // 🔴 드래그로 단계를 옮기려면 **행을 특정할 값**이 카드에 있어야 한다.
+  //    `receivedAt` 이 없으면 덴트웹 행을 못 찾는다 — 그런 카드는 끌 수 없게 둔다.
+  const rat = r.receivedAt || '';
+  return `<div class="pt ${v.urgent ? 'urg' : ''}" ${rat ? 'draggable="true"' : ''}
+    data-pid="${MF.esc(v.pid)}" data-name="${MF.esc(v.name)}"
+    data-status="${MF.esc(r.status)}" data-rat="${MF.esc(rat)}"
+    data-chair="${MF.esc(r.chairId || 0)}">
+    <div class="r1"><span class="nm">${MF.esc(v.name)}</span>
+      ${v.chart ? `<span class="ch">#${MF.esc(v.chart)}</span>` : ''}</div>
+    <div class="r2">${meta.join('<span class="dot"></span>')}</div>
+    ${v.memo ? `<div class="memo">${MF.esc(v.memo)}</div>` : ''}
+    <div class="tags">${tags.join('')}</div>
+    <div class="acts">
+      <button data-hist="${MF.esc(v.pid)}" data-hname="${MF.esc(v.name)}">🕘 히스토리</button>
+      ${v.canSend ? `<button class="pri" data-send="${MF.esc(v.pid)}"
+        data-sname="${MF.esc(v.name)}">문진 보내기</button>` : ''}
+    </div>
+    ${v.canSend ? `<div class="sendmsg" id="sm-${MF.esc(v.pid)}"></div>` : ''}
+  </div>`;
+}
+
+/** 한 번 불러 그린다 — 폴링과 드래그 직후 모두 이 함수를 쓴다. */
+async function loadOnce() {
+  const s = await MF.load();
+  // 「내원 전」은 접수 목록에 없는 사람이라 따로 받는다.
+  //   ⚠️ 실패해도 화면 전체를 죽이지 않는다 — 이 칸만 비면 된다.
+  try { UPCOMING = await loadUpcoming(s.rows); } catch (_) { UPCOMING = []; }
+  await loadKpi();          // 요약 박스(예약변경 요청·부재중) — 실패해도 조용히 둔다
+  MF.setConn(true);
+  render(s);
+}
+
+/** 드래그로 바꾼 뒤 서버 상태를 다시 읽는다(실패해도 조용히 둔다 — 토스트가 이미 말했다). */
+function reload() { loadOnce().catch(() => {}); }
+
+MF.poll(async () => {
+  try {
+    await loadOnce();
+  } catch (e) {
+    MF.setConn(false, '덴트웹 끊김');
+    page.innerHTML = `<div class="err"><b>불러오지 못했어요</b><br>${MF.esc(e.message)}
+      <br><br>서버 설정은 <a href="/management/ops">운영 화면(/management/ops)</a>에서 확인할 수 있어요.</div>`;
+    throw e;
+  }
+});
+</script>
